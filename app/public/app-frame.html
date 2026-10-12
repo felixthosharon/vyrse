@@ -1,0 +1,53 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <!-- Workspace mini apps (vyrse_workspace kind=app) run here: a sandboxed iframe with an opaque origin,
+         no network, no access to VYRSE. The page Hermes wrote arrives once by postMessage. -->
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; media-src data: blob:"
+    />
+    <script>
+      (function () {
+        var loaded = false;
+        addEventListener("message", function (e) {
+          var d = e.data;
+          if (loaded || e.source !== parent || !d || d.type !== "vyrse-app" || typeof d.html !== "string") return;
+          loaded = true;
+          var theme = d.theme || {};
+          var vars = Object.keys(theme)
+            .filter(function (k) { return /^[a-z-]+$/.test(k) && /^[^;{}<>]*$/.test(String(theme[k])); })
+            .map(function (k) { return "--" + k + ":" + theme[k]; })
+            .join(";");
+          var head =
+            "<style>:root{" + vars + ";color-scheme:" + (d.dark ? "dark" : "light") + "}" +
+            "html,body{margin:0;background:transparent;color:var(--fg);font:14px/1.5 system-ui,-apple-system,'Segoe UI',sans-serif}" +
+            "body{padding:2px}button,input,select,textarea{font:inherit}" +
+            // The card sizes itself to the page, so a page sized to the frame (100vh) would grow forever.
+            "html,body{min-height:0!important;height:auto!important}</style>" +
+            // Storage throws in an opaque origin: give pages an in-memory stand-in so they still work.
+            "<script>(function(){function mem(){var m={};return{getItem:function(k){return Object.prototype.hasOwnProperty.call(m,k)?m[k]:null},setItem:function(k,v){m[k]=String(v)},removeItem:function(k){delete m[k]},clear:function(){m={}},key:function(i){return Object.keys(m)[i]||null},get length(){return Object.keys(m).length}}}" +
+            "['localStorage','sessionStorage'].forEach(function(n){try{window[n].getItem('x')}catch(e){try{Object.defineProperty(window,n,{value:mem(),configurable:true})}catch(_){}}})})()<\/script>";
+          var report =
+            "<script>(function(){function r(){var b=document.body;if(!b)return;var s=getComputedStyle(b);parent.postMessage({type:'vyrse-app-height',height:Math.ceil(b.getBoundingClientRect().bottom+parseFloat(s.marginBottom||'0'))+2},'*')}" +
+            "addEventListener('load',r);try{new ResizeObserver(r).observe(document.documentElement)}catch(e){}setTimeout(r,60);setInterval(r,1200)})()<\/script>";
+          var html = d.html;
+          var at = html.search(/<head[^>]*>/i);
+          if (at >= 0) {
+            var end = html.indexOf(">", at) + 1;
+            html = html.slice(0, end) + head + html.slice(end);
+          } else if (/<html[^>]*>/i.test(html)) {
+            html = html.replace(/<html[^>]*>/i, function (m) { return m + "<head>" + head + "</head>"; });
+          } else {
+            html = "<!doctype html><html><head>" + head + "</head><body>" + html + "</body></html>";
+          }
+          document.open();
+          document.write(html + report);
+          document.close();
+        });
+      })();
+    </script>
+  </head>
+  <body></body>
+</html>

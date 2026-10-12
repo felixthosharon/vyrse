@@ -1,0 +1,4 @@
+# Consistent line endings in the repo (Windows editors and tools had mixed CRLF in).
+* text=auto eol=lf
+*.bat text eol=crlf
+*.cmd text eol=crlf

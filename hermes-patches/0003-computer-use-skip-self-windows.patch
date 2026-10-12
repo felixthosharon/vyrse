@@ -1,0 +1,38 @@
+diff --git a/tools/computer_use/cua_backend_capture.py b/tools/computer_use/cua_backend_capture.py
+index 9f58d1197a..392ceda141 100644
+--- a/tools/computer_use/cua_backend_capture.py
++++ b/tools/computer_use/cua_backend_capture.py
+@@ -56,9 +56,22 @@ def _linux_x11_active_window_id() -> Optional[int]:
+     return _parse_xprop_net_active_window(proc.stdout or "") if proc.returncode == 0 else None
+ 
+ def _is_cua_driver_self_window(w: Dict[str, Any]) -> bool:
+-    """True for the authorization daemon's own native window (normalized app name)."""
++    """True for the authorization daemon's own native window (normalized app name; Windows
++    reports the executable, e.g. ``cua-driver.exe``)."""
+     app_name = str(w.get("app_name", "")).strip().lower()
+-    return re.sub(r"[\s_-]+", "", app_name) == "cuadriver"
++    return re.sub(r"[\s_-]+", "", app_name).removesuffix(".exe") == "cuadriver"
++
++
++def _is_skipped_window(w: Dict[str, Any]) -> bool:
++    """Windows a front-end asks implicit captures to pass over (``computer_use.skip_window_titles``),
++    e.g. its own always-on-top status widget, which would otherwise be "frontmost" forever."""
++    try:
++        from tools.computer_use.cua_backend import _computer_use_cfg
++
++        titles = _computer_use_cfg().get("skip_window_titles") or []
++    except Exception:
++        return False
++    return str(w.get("title", "")) in {str(t) for t in titles}
+ 
+ 
+ def _select_capture_target(windows: List[Dict[str, Any]], *, app_requested: bool,
+@@ -77,7 +90,7 @@ def _select_capture_target(windows: List[Dict[str, Any]], *, app_requested: bool
+     # through to the next real window (#94527). Keep the old target when only self-windows
+     # exist, so the driver still reports its normal refusal. Exact targets stay untouched.
+     if not exact_target:
+-        external = [w for w in pool if not _is_cua_driver_self_window(w)]
++        external = [w for w in pool if not _is_cua_driver_self_window(w) and not _is_skipped_window(w)]
+         if external:
+             pool = external
+     if not exact_target and not app_requested and sys.platform == "linux":

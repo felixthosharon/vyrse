@@ -1,0 +1,72 @@
+{#- Gemma 3 chat template for VYRSE/Hermes with tool calling.
+    Gemma's stock template raises unless roles strictly alternate user/model and knows nothing about
+    tools, so llama.cpp could not use it with an agent (and a conversation started on another model
+    could not continue). This one:
+      - folds the system prompt (and the tool list) into the first user turn;
+      - maps tool results to user turns and assistant tool calls to ```tool_call fenced blocks (Gemma's
+        own habit: with <tool_call> tags it still wrote fences, which went unparsed and unexecuted);
+      - merges consecutive messages of the same role instead of failing. -#}
+{{- bos_token -}}
+{%- set ns = namespace(sys='', role='', open=false, sys_done=false) -%}
+{%- for m in messages -%}
+  {%- if m['role'] == 'system' -%}
+    {%- if m['content'] is string -%}
+      {%- set ns.sys = ns.sys + m['content'] + '\n\n' -%}
+    {%- else -%}
+      {%- for part in m['content'] -%}{%- if part['type'] == 'text' -%}{%- set ns.sys = ns.sys + part['text'] + '\n\n' -%}{%- endif -%}{%- endfor -%}
+    {%- endif -%}
+  {%- endif -%}
+{%- endfor -%}
+{%- if tools -%}
+  {%- set ns.sys = ns.sys + '# Tools\n\nYou can call tools. To call one, reply with ONLY a block exactly like this and nothing after it:\n```tool_call\n{"name": "<tool name>", "arguments": {<arguments as JSON>}}\n```\nThe tool runs and its result comes back in a <tool_response> block. Never guess or describe a result you have not received. One block per call.\n\nAvailable tools:\n' -%}
+  {%- for t in tools -%}
+    {%- set ns.sys = ns.sys + (t | tojson) + '\n' -%}
+  {%- endfor -%}
+  {%- set ns.sys = ns.sys + '\n' -%}
+{%- endif -%}
+{%- for m in messages -%}
+  {%- if m['role'] != 'system' -%}
+    {%- set role = 'model' if m['role'] == 'assistant' else 'user' -%}
+    {%- if role != ns.role -%}
+      {%- if ns.open -%}{{- '<end_of_turn>\n' -}}{%- endif -%}
+      {{- '<start_of_turn>' + role + '\n' -}}
+      {%- set ns.role = role -%}
+      {%- set ns.open = true -%}
+    {%- else -%}
+      {{- '\n\n' -}}
+    {%- endif -%}
+    {%- if role == 'user' and not ns.sys_done -%}
+      {{- ns.sys -}}
+      {%- set ns.sys_done = true -%}
+    {%- endif -%}
+    {%- if m['role'] == 'tool' -%}
+      {{- '<tool_response>\n' -}}
+    {%- endif -%}
+    {%- if m['content'] is string -%}
+      {{- m['content'] -}}
+    {%- elif m['content'] -%}
+      {%- for part in m['content'] -%}
+        {%- if part['type'] == 'text' -%}{{- part['text'] -}}{%- elif part['type'] == 'image' or part['type'] == 'image_url' -%}{{- '<start_of_image>' -}}{%- endif -%}
+      {%- endfor -%}
+    {%- endif -%}
+    {%- if m['role'] == 'tool' -%}
+      {{- '\n</tool_response>' -}}
+    {%- endif -%}
+    {%- if m['role'] == 'assistant' and m['tool_calls'] -%}
+      {%- for tc in m['tool_calls'] -%}
+        {%- set fn = tc['function'] if tc['function'] is defined else tc -%}
+        {{- '\n```tool_call\n{"name": "' + fn['name'] + '", "arguments": ' -}}
+        {%- if fn['arguments'] is string -%}{{- fn['arguments'] -}}{%- else -%}{{- fn['arguments'] | tojson -}}{%- endif -%}
+        {{- '}\n```' -}}
+      {%- endfor -%}
+    {%- endif -%}
+  {%- endif -%}
+{%- endfor -%}
+{%- if not ns.sys_done and ns.sys -%}
+  {%- if ns.open -%}{{- '<end_of_turn>\n' -}}{%- endif -%}
+  {{- '<start_of_turn>user\n' + ns.sys -}}
+  {%- set ns.role = 'user' -%}
+  {%- set ns.open = true -%}
+{%- endif -%}
+{%- if ns.open -%}{{- '<end_of_turn>\n' -}}{%- endif -%}
+{%- if add_generation_prompt -%}{{- '<start_of_turn>model\n' -}}{%- endif -%}

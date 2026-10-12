@@ -1,0 +1,8 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">VYRSE</string>
+    <string name="title_activity_main">VYRSE</string>
+    <string name="package_name">dev.vyrse.phone</string>
+    <string name="custom_url_scheme">dev.vyrse.phone</string>
+    <string name="accessibility_description">Lets VYRSE on your own PC operate this phone when you ask it to: read the screen, tap, type, swipe and open apps. It only works after you also allow full control inside VYRSE, never in payment, banking or password apps or password fields, and asks you on the PC before sending, paying, deleting, installing or calling. A glowing border shows while it acts.</string>
+</resources>

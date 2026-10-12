@@ -1,0 +1,25 @@
+node_modules/
+dist/
+out/
+release/
+models/*
+!models/README.md
+*.gguf
+*.onnx
+*.bin
+.venv/
+__pycache__/
+*.log
+.env
+runtime/
+build/
+release/
+release-next/
+dist-phone/
+*.jks
+*.keystore
+keystore.properties
+
+# Personal voice data (your own recordings and models trained on them): kept locally, never published.
+assets/personal/
+app/.tanstack/

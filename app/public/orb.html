@@ -1,0 +1,164 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'" />
+    <title>VYRSE orb</title>
+    <style>
+      /* Status pill: quiet by design, it sits on top of whatever else is on screen. */
+      :root {
+        --pill-bg: rgba(14, 16, 21, 0.9);
+        --pill-border: rgba(255, 255, 255, 0.08);
+        --pill-fg: rgba(236, 240, 245, 0.92);
+        --pill-muted: rgba(236, 240, 245, 0.5);
+        --tone: 200 14% 70%;
+      }
+      :root {
+        --pill-rim: oklch(1 0 0 / 0.26);
+        --pill-rim-low: oklch(1 0 0 / 0.06);
+        --pill-spec: oklch(1 0 0 / 0.09);
+        --pill-inner: oklch(1 0 0 / 0.08);
+      }
+      /* Theme follows the app's setting (orb.js), not just Windows'. */
+      :root.light {
+        --pill-rim: oklch(1 0 0 / 0.95);
+        --pill-rim-low: oklch(0.3 0.014 250 / 0.12);
+        --pill-spec: oklch(1 0 0 / 0.6);
+        --pill-inner: oklch(1 0 0 / 0.7);
+      }
+      :root[data-glass="subtle"] { --pill-rim: oklch(1 0 0 / 0.12); --pill-spec: transparent; }
+      :root[data-glass="off"] { --pill-rim: var(--pill-border); --pill-rim-low: var(--pill-border); --pill-spec: transparent; --pill-inner: transparent; }
+      :root.light {
+        --pill-bg: rgba(250, 250, 252, 0.94);
+        --pill-border: rgba(0, 0, 0, 0.08);
+        --pill-fg: rgba(20, 22, 28, 0.9);
+        --pill-muted: rgba(20, 22, 28, 0.5);
+      }
+      html, body {
+        margin: 0;
+        height: 100%;
+        background: transparent;
+        overflow: hidden;
+        user-select: none;
+        font: 500 13.5px/1.35 "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+        letter-spacing: 0.01em;
+      }
+      body {
+        display: flex;
+        justify-content: center;
+        align-items: flex-start;
+        padding-top: 8px;
+        box-sizing: border-box;
+      }
+      body[data-presence="listening"] { --tone: 190 70% 62%; }
+      body[data-presence="thinking"], body[data-presence="working"] { --tone: 250 40% 72%; }
+      body[data-presence="speaking"] { --tone: 165 50% 55%; }
+      body[data-presence="reminder"] { --tone: 38 80% 60%; }
+      body[data-presence="error"] { --tone: 0 70% 64%; }
+
+      .pill {
+        all: unset;
+        cursor: pointer;
+        position: relative;
+        overflow: hidden;
+        box-sizing: border-box;
+        display: inline-flex;
+        align-items: center;
+        gap: 10px;
+        height: 40px;
+        min-width: 148px;
+        max-width: 500px;
+        padding: 0 17px 0 15px;
+        border-radius: 999px;
+        background: radial-gradient(120% 90% at 18% -30%, var(--pill-spec), transparent 60%), var(--pill-bg);
+        border: 0;
+        box-shadow: inset 0 1px 0 0 var(--pill-inner), inset 0 -1px 1px 0 var(--pill-rim-low), 0 1px 1px rgba(0, 0, 0, 0.2), 0 8px 22px -6px rgba(0, 0, 0, 0.35);
+        isolation: isolate;
+        color: var(--pill-fg);
+        opacity: 0;
+        transform: translateY(-6px) scale(0.96);
+        transition: opacity 220ms ease, transform 260ms cubic-bezier(0.2, 0.9, 0.3, 1.15);
+      }
+      body.shown .pill { opacity: 1; transform: none; }
+      /* Rim of light around the capsule (liquid glass), brighter top-left. */
+      .pill::before {
+        content: "";
+        position: absolute;
+        inset: 0;
+        border-radius: inherit;
+        padding: 1px;
+        background: linear-gradient(145deg, var(--pill-rim), transparent 34%, transparent 62%, var(--pill-rim-low) 85%, var(--pill-rim) 120%);
+        mask: linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0);
+        pointer-events: none;
+      }
+      /* A faint light sweep while VYRSE is thinking or working. */
+      .pill::after {
+        content: "";
+        position: absolute;
+        inset: 0;
+        border-radius: inherit;
+        background: linear-gradient(100deg, transparent 30%, hsl(var(--tone) / 0.16) 50%, transparent 70%);
+        transform: translateX(-100%);
+        opacity: 0;
+        pointer-events: none;
+      }
+      body[data-presence="thinking"] .pill::after,
+      body[data-presence="working"] .pill::after { opacity: 1; animation: sweep 2.6s ease-in-out infinite; }
+      .pill:focus-visible { outline: 2px solid hsl(var(--tone)); outline-offset: 2px; }
+
+      .dot {
+        width: 8px;
+        height: 8px;
+        flex: none;
+        border-radius: 50%;
+        background: hsl(var(--tone));
+        transition: background 250ms ease;
+      }
+      body[data-presence="thinking"] .dot,
+      body[data-presence="working"] .dot { animation: breathe 1.8s ease-in-out infinite; }
+
+      .label {
+        flex: 1 1 auto;
+        min-width: 0;
+        /* Room for descenders (g, p, y): overflow is clipped to the line box. */
+        padding-block: 2px;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        transition: opacity 160ms ease, transform 160ms ease;
+      }
+      .label.changing { opacity: 0; transform: translateY(3px); }
+      .label .sub { color: var(--pill-muted); font-weight: 400; }
+
+      .meter { display: none; flex: none; align-items: center; gap: 2px; height: 14px; }
+      body[data-presence="listening"] .meter,
+      body[data-presence="speaking"] .meter { display: inline-flex; }
+      .meter i {
+        width: 2.5px;
+        height: 4px;
+        border-radius: 1px;
+        background: hsl(var(--tone));
+        opacity: 0.85;
+        animation: level 1.1s ease-in-out infinite;
+      }
+      .meter i:nth-child(2) { animation-delay: 0.18s; }
+      .meter i:nth-child(3) { animation-delay: 0.36s; }
+
+      @keyframes breathe { 50% { opacity: 0.35; } }
+      @keyframes level { 0%, 100% { height: 4px; } 50% { height: 13px; } }
+      @keyframes sweep { 0% { transform: translateX(-100%); } 60%, 100% { transform: translateX(100%); } }
+      @media (prefers-reduced-motion: reduce) {
+        .dot, .meter i, .pill::after { animation: none !important; }
+        .pill, .label { transition: none; }
+      }
+    </style>
+  </head>
+  <body data-presence="listening">
+    <button class="pill" id="pill" type="button" aria-label="Open VYRSE">
+      <span class="dot" aria-hidden="true"></span>
+      <span class="label" id="label">Listening…</span>
+      <span class="meter" aria-hidden="true"><i></i><i></i><i></i></span>
+    </button>
+    <script src="./orb.js"></script>
+  </body>
+</html>

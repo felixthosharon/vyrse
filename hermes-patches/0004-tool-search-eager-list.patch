@@ -1,0 +1,33 @@
+diff --git a/tools/tool_search.py b/tools/tool_search.py
+index a460a4466d..42a3c128fc 100644
+--- a/tools/tool_search.py
++++ b/tools/tool_search.py
+@@ -147,12 +147,28 @@ _DIRECT_SURFACE_TOOLSETS = frozenset({"desktop_ui", "project", "setup"})
+ _DEFAULT_DEFERRED_TOOLS = frozenset(DEFAULT_CONFIG["tools"]["tool_search"]["defer"])
+ 
+ 
++def _eager_tool_names() -> frozenset:
++    """``tools.tool_search.eager``: tools that must always be loaded, e.g. a front-end plugin's
++    primary tools (plugin tools are otherwise deferrable by default). Wins over ``defer``."""
++    try:
++        import hermes_cli.config as _cfg_mod
++        tools_cfg = (_cfg_mod.load_config_readonly() or {}).get("tools") or {}
++        raw = (tools_cfg.get("tool_search") or {}).get("eager") if isinstance(tools_cfg, dict) else None
++        if isinstance(raw, (list, tuple, set)):
++            return frozenset(str(n).strip() for n in raw if str(n).strip())
++    except Exception as e:
++        logger.debug("Failed to read tools.tool_search.eager: %s", e)
++    return frozenset()
++
++
+ def is_deferrable_tool_name(name: str, defer_tools: Optional[frozenset] = None) -> bool:
+     """True if a tool is *eligible* for deferral: named in ``defer_tools`` (curated set or
+     user override), OR an MCP tool, OR neither core nor a session-gated GUI surface (i.e. a
+     plugin tool). Bridge names never defer."""
+     if name in BRIDGE_TOOL_NAMES:
+         return False
++    if name in _eager_tool_names():
++        return False
+     if defer_tools is not None and name in defer_tools:
+         return True
+     if name in _core_tool_names():

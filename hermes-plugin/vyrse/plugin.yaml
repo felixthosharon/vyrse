@@ -1,0 +1,6 @@
+name: vyrse
+version: 0.1.0
+description: "VYRSE desktop integration: lets Hermes control the VYRSE interface (theme, panels, conversations, mode, model) and stores VYRSE interface preferences."
+author: VYRSE
+provides_tools:
+  - vyrse_ui

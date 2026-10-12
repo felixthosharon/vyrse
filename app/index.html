@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="author" content="Vyrse" />
+    <meta property="og:type" content="website" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="theme-color" content="#101317" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self' file: data: blob:; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' http://127.0.0.1:* ws://127.0.0.1:*; media-src 'self' blob: data:; object-src 'none'; base-uri 'self'; form-action 'self'" />
+    <link rel="icon" href="./favicon.ico" type="image/x-icon" />
+    <!-- Route-level head() overrides (title, description, og tags) are applied
+         at runtime by <HeadContent /> in src/routes/__root.tsx. This title is
+         the static fallback shown before/without JS. -->
+    <title>Vyrse — A personal AI presence</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="./src/main.tsx"></script>
+  </body>
+</html>

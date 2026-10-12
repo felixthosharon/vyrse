@@ -1,0 +1,13 @@
+diff --git a/tui_gateway/methods_tools.py b/tui_gateway/methods_tools.py
+index 039be4b47e..3a5b6f4297 100644
+--- a/tui_gateway/methods_tools.py
++++ b/tui_gateway/methods_tools.py
+@@ -1451,7 +1451,7 @@ del _name, _fn, _keys
+ def _skills_search(rid, params, query):
+     search, gh = _tools_mod("tools.skills_hub_search"), _tools_mod("tools.skills_hub_github")
+     raw = search.unified_search(query, search.create_source_router(gh.GitHubAuth()), source_filter="all", limit=20) or []
+-    return _ok(rid, {"results": [{"name": r.name, "description": r.describe()} for r in raw]})
++    return _ok(rid, {"results": [{"name": r.name, "description": r.description} for r in raw]})
+ 
+ 
+ def _skills_install(rid, params, query):

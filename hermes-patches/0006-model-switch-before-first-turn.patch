@@ -1,0 +1,74 @@
+diff --git a/tui_gateway/methods_config_set.py b/tui_gateway/methods_config_set.py
+index d96fea32de..029b87e4bb 100644
+--- a/tui_gateway/methods_config_set.py
++++ b/tui_gateway/methods_config_set.py
+@@ -4,6 +4,7 @@ are rebound onto server.py's globals (method_ctx.bind_module) and reference them
+ Keys match exactly except ``details_mode.<section>`` (prefix) and ``_DISPLAY_TOGGLE_KEYS``.
+ """
+ 
++import threading
+ import os
+ 
+ from hermes_constants import INDICATOR_STYLES
+@@ -122,6 +123,18 @@ def _set_model(rid, params, key, value, session):
+         if session.get("running") or session.get("_compute_host_active"):
+             return _stash_pending_model_switch(rid, key, value, session, confirmed, parsed_flags)
+         explicit_provider = parsed_flags.explicit_provider
++        # A new session schedules its agent build right after session.create, and resolving the switch
++        # below can take seconds (it queries the model server), so a build could start meanwhile with
++        # the old model. Pin the pick provisionally first, under the build lock, so a build starting
++        # during the switch already uses it; switch_model then replaces it with the full runtime.
++        provisional = None
++        if (session.get("agent") is None and parsed_flags.target and explicit_provider.strip()
++                and not parsed_flags.is_once):
++            with session.setdefault("agent_build_lock", threading.Lock()):
++                if not session.get("agent_build_started"):
++                    provisional = (session.get("model_override"),)
++                    session["model_override"] = {"model": parsed_flags.target,
++                                                 "provider": explicit_provider.strip()}
+         failed_agent_init = session.get("agent") is None and session.get("agent_error") is not None
+         failed_ready = session.get("agent_ready") if failed_agent_init else None
+         if failed_agent_init:
+@@ -136,9 +149,20 @@ def _set_model(rid, params, key, value, session):
+             _start_agent_build(sid, session)
+             if init_err := _cfgset_await_agent(session, rid):
+                 return init_err
+-        with _session_profile_runtime_scope(session):
+-            result = _apply_model_switch(sid, session, value, confirm_expensive_model=confirmed,
+-                                         parsed_flags=parsed_flags)
++        elif session.get("agent") is None and session.get("agent_build_started") and not failed_agent_init:
++            # A build is already running (new sessions start one right away). Switching now would only
++            # record the pick while the build finishes on the old model, so wait for it and switch the
++            # finished agent instead.
++            if init_err := _cfgset_await_agent(session, rid):
++                return init_err
++        try:
++            with _session_profile_runtime_scope(session):
++                result = _apply_model_switch(sid, session, value, confirm_expensive_model=confirmed,
++                                             parsed_flags=parsed_flags)
++        except BaseException:
++            if provisional is not None:
++                session["model_override"] = provisional[0]
++            raise
+         if failed_agent_init and not result.get("confirm_required"):
+             _restart_completed_failed_agent_build(sid, session, failed_ready)
+             if init_err := _cfgset_await_agent(session, rid):
+diff --git a/tui_gateway/model_switch.py b/tui_gateway/model_switch.py
+index 4adbbf447c..60589a3040 100644
+--- a/tui_gateway/model_switch.py
++++ b/tui_gateway/model_switch.py
+@@ -355,6 +355,14 @@ def _apply_model_switch(
+         session["model_override"] = {
+             "model": result.new_model, "provider": result.target_provider,
+             "base_url": result.base_url, "api_key": result.api_key, "api_mode": result.api_mode}
++        # Not built yet (a new or cold-resumed session): the deferred build prefers the stored runtime in
++        # resume_runtime_overrides over model_override, which silently dropped this pick. Carry it there too,
++        # as _restart_completed_failed_agent_build does.
++        resume_overrides = session.get("resume_runtime_overrides")
++        if agent is None and isinstance(resume_overrides, dict) and resume_overrides:
++            resume_overrides = {**resume_overrides, "model_override": session["model_override"]}
++            resume_overrides["provider_override"] = result.target_provider
++            session["resume_runtime_overrides"] = resume_overrides
+     if persist_global:
+         from hermes_cli.model_switch import persist_model_selection
+         persist_model_selection(result)

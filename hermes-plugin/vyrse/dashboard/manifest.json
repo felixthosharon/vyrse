@@ -1,0 +1,6 @@
+{
+  "name": "vyrse",
+  "label": "VYRSE",
+  "description": "Backend routes for the VYRSE desktop interface (interface preferences).",
+  "api": "plugin_api.py"
+}

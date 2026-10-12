@@ -1,0 +1,72 @@
+diff --git a/hermes_cli/local_runtime/presets.py b/hermes_cli/local_runtime/presets.py
+index 445531fb01..a6d5ba061f 100644
+--- a/hermes_cli/local_runtime/presets.py
++++ b/hermes_cli/local_runtime/presets.py
+@@ -138,8 +138,65 @@ def preset_for_model(gguf: Path, budget: HardwareBudget,
+             keys["spec-type"] = "draft-dspark"
+             # Unsloth's measured cliff: acceptance 83% at 2-3 drafts, collapses at 4.
+             keys["spec-draft-n-max"] = "3"
+-    return PresetEntry(model_id=model_id, window=decision.window,
+-                       spilled=decision.spilled, keys=keys)
++    window, spilled = decision.window, decision.spilled
++    override = launch_override(model_id)
++    if override:
++        window, spilled = _apply_launch_override(keys, override, window, spilled)
++    return PresetEntry(model_id=model_id, window=window, spilled=spilled, keys=keys)
++
++
++def launch_override(model_id: str) -> dict:
++    """``local_runtime.launch_overrides.<model_id>``: a user's measured launch shape for one model,
++    applied over the planner's decision (e.g. a smaller window that keeps every layer on the GPU)."""
++    try:
++        from hermes_cli.config import load_config_readonly
++
++        overrides = ((load_config_readonly() or {}).get("local_runtime") or {}).get("launch_overrides") or {}
++        value = overrides.get(model_id) if isinstance(overrides, dict) else None
++        return dict(value) if isinstance(value, dict) else {}
++    except Exception as exc:
++        logger.debug("launch override for %s unreadable: %s", model_id, exc)
++        return {}
++
++
++def _apply_launch_override(keys: dict, override: dict, window: int, spilled: bool) -> tuple[int, bool]:
++    """Mutates ``keys``. ``ctx`` (tokens), ``ubatch`` (tokens), ``gpu_layers`` ("all" or an int),
++    ``mmproj`` (vision projector path), ``mmproj_offload`` (false keeps the projector on the CPU, so
++    vision costs no VRAM), ``image_max_tokens`` (caps per-image work) and ``chat_template_file`` (a
++    Jinja template replacing the GGUF's own, e.g. one that supports tool calls)."""
++    try:
++        if override.get("ctx"):
++            window = int(override["ctx"])
++            keys["ctx-size"] = str(window)
++        if override.get("ubatch"):
++            ubatch = int(override["ubatch"])
++            keys["ubatch-size"] = str(ubatch)
++            keys["batch-size"] = str(max(ubatch, int(keys.get("batch-size") or ubatch)))
++        if override.get("mmproj"):
++            projector = Path(str(override["mmproj"])).expanduser()
++            if projector.is_file():
++                keys["mmproj"] = str(projector)
++                if override.get("mmproj_offload") is False:
++                    keys["no-mmproj-offload"] = "true"
++                if override.get("image_max_tokens"):
++                    keys["image-max-tokens"] = str(int(override["image_max_tokens"]))
++            else:
++                logger.warning("launch override mmproj not found: %s", projector)
++        if override.get("chat_template_file"):
++            template = Path(str(override["chat_template_file"])).expanduser()
++            if template.is_file():
++                keys["chat-template-file"] = str(template)
++                keys["jinja"] = "true"
++            else:
++                logger.warning("launch override chat_template_file not found: %s", template)
++        layers = override.get("gpu_layers")
++        if layers is not None:
++            keys.pop("override-tensor", None)
++            keys["n-gpu-layers"] = "999" if str(layers).lower() == "all" else str(int(layers))
++            spilled = str(layers).lower() != "all"
++    except (TypeError, ValueError) as exc:
++        logger.warning("ignoring malformed launch override %r: %s", override, exc)
++    return window, spilled
+ 
+ 
+ def resident_footprint(gguf: Path, budget: HardwareBudget, window: int) -> int | None:

@@ -1,0 +1,36 @@
+diff --git a/tui_gateway/agent_callbacks.py b/tui_gateway/agent_callbacks.py
+index f9d97771cf..597848ce3b 100644
+--- a/tui_gateway/agent_callbacks.py
++++ b/tui_gateway/agent_callbacks.py
+@@ -340,6 +340,17 @@ def _cfg_max_turns(cfg: dict, default: int) -> int:
+     return default if raw is None else _resolve_turn_limit(raw, default=default)
+ 
+ 
++def _cfg_max_output_tokens(cfg: dict) -> int | None:
++    """``agent.max_output_tokens``: the most tokens one model reply may generate (None = no cap, the
++    default). A small local model that loops otherwise generates until the server is killed."""
++    raw = (cfg.get("agent") or {}).get("max_output_tokens")
++    try:
++        value = int(raw) if raw is not None else 0
++    except (TypeError, ValueError):
++        return None
++    return value if value > 0 else None
++
++
+ def _parse_tui_skills_env() -> list[str]:
+     raw = os.environ.get("HERMES_TUI_SKILLS", "")
+     return list(dict.fromkeys(p.strip() for p in raw.replace("\n", ",").split(",") if p.strip()))
+diff --git a/tui_gateway/server.py b/tui_gateway/server.py
+index 2ec14e2952..4b2f7fbf5e 100644
+--- a/tui_gateway/server.py
++++ b/tui_gateway/server.py
+@@ -2663,7 +2663,8 @@ def _make_agent(
+     with _sessions_lock:
+         session = _sessions.get(sid)
+     agent = AIAgent(
+-        model=model, max_iterations=_cfg_max_turns(cfg, 500), provider=runtime.get("provider"),
++        model=model, max_iterations=_cfg_max_turns(cfg, 500), max_tokens=_cfg_max_output_tokens(cfg),
++        provider=runtime.get("provider"),
+         requested_provider=runtime.get("requested_provider"),
+         base_url=runtime.get("base_url"), api_key=runtime.get("api_key"), api_mode=runtime.get("api_mode"),
+         acp_command=runtime.get("command"), acp_args=runtime.get("args"),

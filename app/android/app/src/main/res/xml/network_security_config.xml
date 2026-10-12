@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The VYRSE phone bridge is plain http on the home Wi-Fi (the user chose Wi-Fi without Tailscale).
+     Only the bridge is contacted; the app's own UI is bundled and served from https://localhost. -->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true" />
+</network-security-config>

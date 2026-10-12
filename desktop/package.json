@@ -1,0 +1,74 @@
+{
+  "name": "vyrse-desktop",
+  "private": true,
+  "version": "1.5.0",
+  "description": "VYRSE desktop shell: runs Hermes Agent and hosts the VYRSE UI",
+  "main": "build/main/main.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "start": "npm run build && electron .",
+    "dev": "npm run build && cross-env VYRSE_RENDERER_URL=http://localhost:5173 electron .",
+    "dist": "npm run build && npm --prefix ../app run build && electron-builder --win nsis",
+    "pack": "npm run build && npm --prefix ../app run build && electron-builder --win dir"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "cross-env": "^10.0.0",
+    "electron": "44.5.1",
+    "electron-builder": "^26.15.3",
+    "typescript": "^5.8.3",
+    "vitest": "^5.0.3"
+  },
+  "productName": "VYRSE",
+  "author": "VYRSE contributors",
+  "build": {
+    "appId": "dev.vyrse.desktop",
+    "productName": "VYRSE",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "build/**",
+      "resources/icon.png",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "../app/dist",
+        "to": "renderer"
+      }
+    ],
+    "win": {
+      "icon": "resources/icon.ico",
+      "target": [
+        "nsis"
+      ]
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "artifactName": "VYRSE-Setup-${version}.${ext}"
+    },
+    "asar": true,
+    "electronFuses": {
+      "runAsNode": false,
+      "enableCookieEncryption": true,
+      "enableNodeOptionsEnvironmentVariable": false,
+      "enableNodeCliInspectArguments": false,
+      "enableEmbeddedAsarIntegrityValidation": true,
+      "onlyLoadAppFromAsar": true,
+      "loadBrowserProcessSpecificV8Snapshot": false
+    }
+  },
+  "dependencies": {
+    "@ngrok/ngrok": "^1.7.0",
+    "@types/ws": "^8.18.2",
+    "alexa-remote2": "^8.1.1",
+    "ws": "^8.22.0"
+  },
+  "overrides": {
+    "cookie": "^0.7.2"
+  }
+}

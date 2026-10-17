@@ -8,13 +8,14 @@ from __future__ import annotations
 
 import base64
 import json
+import os
 import re
 import subprocess
 from pathlib import Path
 from typing import Any, Dict
 
 _SCRIPT = Path(__file__).resolve().parent / "desktop.ps1"
-ACTIONS = ("windows", "open", "type", "read", "click", "focus", "close", "arrange", "keys")
+ACTIONS = ("windows", "open", "type", "read", "click", "focus", "close", "arrange", "tidy", "keys")
 
 SCHEMA: Dict[str, Any] = {
     "name": "vyrse_desktop",
@@ -26,8 +27,8 @@ SCHEMA: Dict[str, Any] = {
         "icon buttons, e.g. 'the gear icon', 'share'; VYRSE looks at the window to find the right one); focus (bring a window to "
         "the front, only when the user wants to see it); close; arrange (window, position: left/right/top/bottom, "
         "top-left/top-right/bottom-left/bottom-right, left-third/middle-third/right-third, left-two-thirds/"
-        "right-two-thirds, full, center, minimize, maximize, restore: 'tidy my windows' = one arrange per window, "
-        "e.g. code left, chat right, music minimize); keys (window, keys like ctrl+s to save, alt+f4; brings that "
+        "right-two-thirds, full, center, minimize, maximize, restore); tidy ('tidy/organise my windows/desktop': lays out every "
+        "open window side by side in one go, front-most biggest; closes nothing); keys (window, keys like ctrl+s to save, alt+f4; brings that "
         "window forward). `window` = part of the title or the app name. "
         "If it reports it can't do something, fall back to computer_use."
     ),
@@ -50,6 +51,10 @@ SCHEMA: Dict[str, Any] = {
 
 def run(request: Dict[str, Any], timeout: int = 30) -> Dict[str, Any]:
     from hermes_cli._subprocess_compat import windows_hide_flags
+
+    # Tests of the model's choices: report what would happen, never touch the user's windows.
+    if os.environ.get("VYRSE_DESKTOP_DRY") and request.get("action") not in ("windows", "read"):
+        return {"ok": True, "dry_run": True, "would": request}
 
     payload = base64.b64encode(json.dumps(request).encode("utf-8")).decode("ascii")
     result = subprocess.run(
@@ -84,7 +89,19 @@ def handle(params: Dict[str, Any], **_: Any) -> str:
     if action not in ACTIONS:
         return json.dumps({"ok": False, "error": f"unknown action {action!r}"})
     request = {k: params[k] for k in ("action", "target", "window", "text", "mode", "name", "position", "keys") if params.get(k) is not None}
-    if action in ("type", "read", "click", "keys", "close", "focus", "arrange") and not request.get("window") and _last_window:
+    # The window can come as `window`, or (often, from local models) as `target`/`name`.
+    if action in ("type", "read", "focus", "close", "arrange", "keys") and not request.get("window"):
+        alt = request.get("target") or (request.get("name") if action != "click" else None)
+        if alt:
+            request["window"] = alt
+    if action == "close" and re.search(r"program manager|^explorer$|desktop|taskbar|overlay|rainmeter", str(request.get("window") or ""), re.I):
+        return json.dumps({"ok": False, "error": "That's part of Windows itself (the desktop, taskbar or an overlay), not an app window; "
+                                                 "I won't close it. Tidying moves windows; it never needs to close anything."})
+    if action == "arrange" and not request.get("window"):
+        # "arrange" with no window is the model reaching for a whole-desktop layout
+        return json.dumps({"ok": False, "error": "arrange moves ONE window: give window (its title or app name). "
+                                                 "To lay out all open windows at once, use action=tidy."})
+    if action in ("type", "read", "click", "keys", "close", "focus") and not request.get("window") and _last_window:
         request["window"] = _last_window
     try:
         if action == "type" and request.get("mode") == "replace" and request.get("window"):

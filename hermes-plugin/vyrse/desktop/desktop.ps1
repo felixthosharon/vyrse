@@ -30,6 +30,9 @@ $A = [System.Windows.Automation.AutomationElement]
 $CT = [System.Windows.Automation.ControlType]
 $Scope = [System.Windows.Automation.TreeScope]
 $Self = @('VYRSE', 'electron', 'cua-driver', 'TextInputHost', 'ShellExperienceHost', 'SearchHost', 'StartMenuExperienceHost')
+# Not windows a person works in: the desktop itself, overlays, widgets and desktop skins. Never listed, moved or closed.
+$NotApps = @('NVIDIA Overlay', 'NVIDIA Share', 'Rainmeter', 'Widgets', 'WidgetBoard', 'GameBar', 'GameBarFTServer', 'LockApp',
+  'SystemSettingsBroker', 'XboxGameBarWidgets', 'PhoneExperienceHost', 'CrossDeviceResume')
 
 function Out-Json($obj) { $obj | ConvertTo-Json -Compress -Depth 5; exit 0 }
 function Fail($message) { Out-Json @{ ok = $false; error = $message } }
@@ -41,7 +44,7 @@ function Get-AppWindows {
       $c = $w.Current
       if (-not $c.Name -or $c.IsOffscreen) { continue }
       $proc = (Get-Process -Id $c.ProcessId -ErrorAction SilentlyContinue).ProcessName
-      if ($Self -contains $proc -or $c.Name -match '^(VYRSE|Vyrse)') { continue }
+      if ($Self -contains $proc -or $NotApps -contains $proc -or $c.Name -match '^(VYRSE|Vyrse)' -or $c.Name -eq 'Program Manager') { continue }
       $list += [pscustomobject]@{ el = $w; title = $c.Name; app = $proc; pid = $c.ProcessId; hwnd = $c.NativeWindowHandle }
     } catch {}
   }
@@ -49,14 +52,47 @@ function Get-AppWindows {
 }
 
 function Find-Window([string]$query) {
+  if ($req.hwnd) {
+    $hit = Get-AppWindows | Where-Object { $_.hwnd -eq [int]$req.hwnd } | Select-Object -First 1
+    if ($hit) { return $hit }
+  }
   if (-not $query) { Fail 'Say which window: part of its title or the app name (e.g. "notepad").' }
   $q = $query.ToLower() -replace '\.exe$', ''
+  $qs = $q -replace '[ _-]', ''  # "Windows Terminal" = WindowsTerminal
   $wins = Get-AppWindows
-  $hit = $wins | Where-Object { $_.app.ToLower() -eq $q } | Select-Object -First 1
+  $hit = $wins | Where-Object { $_.app.ToLower() -eq $q -or $_.app.ToLower() -eq $qs } | Select-Object -First 1
   if (-not $hit) { $hit = $wins | Where-Object { $_.title.ToLower().Contains($q) } | Select-Object -First 1 }
   if (-not $hit) { $hit = $wins | Where-Object { $_.app.ToLower().Contains($q) } | Select-Object -First 1 }
   if (-not $hit) { Fail "No open window matches '$query'. Open windows: $(($wins | ForEach-Object { "$($_.title) [$($_.app)]" }) -join '; ')" }
   $hit
+}
+
+function Set-Place($w, [string]$pos) {
+  $h = [IntPtr]$w.hwnd
+  switch ($pos) {
+    { $_ -in 'minimize', 'minimise' } { [void][VyrseUser32]::ShowWindow($h, 6); return @{ ok = $true; window = $w.title; now = 'minimized' } }
+    'maximize' { [void][VyrseUser32]::ShowWindow($h, 3); return @{ ok = $true; window = $w.title; now = 'maximized' } }
+    'restore' { [void][VyrseUser32]::ShowWindow($h, 9); return @{ ok = $true; window = $w.title; now = 'restored' } }
+  }
+  $frac = @{ 'left' = @(0, 0, 0.5, 1); 'right' = @(0.5, 0, 0.5, 1); 'top' = @(0, 0, 1, 0.5); 'bottom' = @(0, 0.5, 1, 0.5);
+    'top-left' = @(0, 0, 0.5, 0.5); 'top-right' = @(0.5, 0, 0.5, 0.5); 'bottom-left' = @(0, 0.5, 0.5, 0.5); 'bottom-right' = @(0.5, 0.5, 0.5, 0.5);
+    'full' = @(0, 0, 1, 1); 'center' = @(0.15, 0.1, 0.7, 0.8);
+    'left-third' = @(0, 0, 0.3333, 1); 'middle-third' = @(0.3333, 0, 0.3334, 1); 'right-third' = @(0.6667, 0, 0.3333, 1);
+    'left-two-thirds' = @(0, 0, 0.6667, 1); 'right-two-thirds' = @(0.3333, 0, 0.6667, 1) }
+  if (-not $frac.ContainsKey($pos)) { return @{ ok = $false; error = "Position must be one of: $(($frac.Keys + @('minimize','maximize','restore')) -join ', ')." } }
+  [void][VyrseUser32]::ShowWindow($h, 9)
+  $screen = [System.Windows.Forms.Screen]::FromHandle($h).WorkingArea
+  $f = $frac[$pos]
+  $x = $screen.X + [int]($screen.Width * $f[0]); $y = $screen.Y + [int]($screen.Height * $f[1])
+  $wd = [int]($screen.Width * $f[2]); $ht = [int]($screen.Height * $f[3])
+  $outer = New-Object VyrseUser32+RECT; $vis = New-Object VyrseUser32+RECT
+  [void][VyrseUser32]::GetWindowRect($h, [ref]$outer)
+  $dl = 0; $dt = 0; $dr = 0; $db = 0
+  if ([VyrseUser32]::DwmGetWindowAttribute($h, 9, [ref]$vis, 16) -eq 0) {
+    $dl = $vis.Left - $outer.Left; $dt = $vis.Top - $outer.Top; $dr = $outer.Right - $vis.Right; $db = $outer.Bottom - $vis.Bottom
+  }
+  [void][VyrseUser32]::MoveWindow($h, $x - $dl, $y - $dt, $wd + $dl + $dr, $ht + $dt + $db, $true)
+  @{ ok = $true; window = $w.title; app = $w.app; now = $pos }
 }
 
 function Get-EditTarget($win) {
@@ -232,33 +268,25 @@ switch ($req.action) {
     # Snap a window to part of its screen (flush, compensating for Windows 11's invisible resize borders),
     # or minimise / maximise / restore it. Doesn't take focus.
     $w = Find-Window $req.window
-    $h = [IntPtr]$w.hwnd
     $pos = ([string]$req.position).ToLower().Trim() -replace '[ _]', '-'
-    switch ($pos) {
-      'minimize' { [void][VyrseUser32]::ShowWindow($h, 6); Out-Json @{ ok = $true; window = $w.title; now = 'minimized' } }
-      'minimise' { [void][VyrseUser32]::ShowWindow($h, 6); Out-Json @{ ok = $true; window = $w.title; now = 'minimized' } }
-      'maximize' { [void][VyrseUser32]::ShowWindow($h, 3); Out-Json @{ ok = $true; window = $w.title; now = 'maximized' } }
-      'restore' { [void][VyrseUser32]::ShowWindow($h, 9); Out-Json @{ ok = $true; window = $w.title; now = 'restored' } }
+    $r = Set-Place $w $pos
+    if (-not $r.ok) { Fail $r.error }
+    Out-Json $r
+  }
+  'tidy' {
+    # "Tidy my windows": the ones that are open (not minimised), front-most first, laid out side by side.
+    # 1 -> full; 2 -> halves; 3 -> left half + right quarters; 4 -> quarters; more -> the four in front, rest minimised.
+    $wins = @(Get-AppWindows | Where-Object { -not [VyrseUser32]::IsIconic([IntPtr]$_.hwnd) })
+    if ($wins.Count -eq 0) { Fail 'No open windows to tidy.' }
+    $layouts = @{ 1 = @('full'); 2 = @('left', 'right'); 3 = @('left', 'top-right', 'bottom-right'); 4 = @('top-left', 'top-right', 'bottom-left', 'bottom-right') }
+    $n = [Math]::Min(4, $wins.Count)
+    $done = @()
+    for ($i = 0; $i -lt $wins.Count; $i++) {
+      $pos = if ($i -lt $n) { $layouts[$n][$i] } else { 'minimize' }
+      $r = Set-Place $wins[$i] $pos
+      $done += "$($wins[$i].app): $pos"
     }
-    $frac = @{ 'left' = @(0, 0, 0.5, 1); 'right' = @(0.5, 0, 0.5, 1); 'top' = @(0, 0, 1, 0.5); 'bottom' = @(0, 0.5, 1, 0.5);
-      'top-left' = @(0, 0, 0.5, 0.5); 'top-right' = @(0.5, 0, 0.5, 0.5); 'bottom-left' = @(0, 0.5, 0.5, 0.5); 'bottom-right' = @(0.5, 0.5, 0.5, 0.5);
-      'full' = @(0, 0, 1, 1); 'center' = @(0.15, 0.1, 0.7, 0.8);
-      'left-third' = @(0, 0, 0.3333, 1); 'middle-third' = @(0.3333, 0, 0.3334, 1); 'right-third' = @(0.6667, 0, 0.3333, 1);
-      'left-two-thirds' = @(0, 0, 0.6667, 1); 'right-two-thirds' = @(0.3333, 0, 0.6667, 1) }
-    if (-not $frac.ContainsKey($pos)) { Fail "Position must be one of: $(($frac.Keys + @('minimize','maximize','restore')) -join ', ')." }
-    [void][VyrseUser32]::ShowWindow($h, 9)
-    $screen = [System.Windows.Forms.Screen]::FromHandle($h).WorkingArea
-    $f = $frac[$pos]
-    $x = $screen.X + [int]($screen.Width * $f[0]); $y = $screen.Y + [int]($screen.Height * $f[1])
-    $wd = [int]($screen.Width * $f[2]); $ht = [int]($screen.Height * $f[3])
-    $outer = New-Object VyrseUser32+RECT; $vis = New-Object VyrseUser32+RECT
-    [void][VyrseUser32]::GetWindowRect($h, [ref]$outer)
-    $dl = 0; $dt = 0; $dr = 0; $db = 0
-    if ([VyrseUser32]::DwmGetWindowAttribute($h, 9, [ref]$vis, 16) -eq 0) {
-      $dl = $vis.Left - $outer.Left; $dt = $vis.Top - $outer.Top; $dr = $outer.Right - $vis.Right; $db = $outer.Bottom - $vis.Bottom
-    }
-    [void][VyrseUser32]::MoveWindow($h, $x - $dl, $y - $dt, $wd + $dl + $dr, $ht + $dt + $db, $true)
-    Out-Json @{ ok = $true; window = $w.title; app = $w.app; now = $pos }
+    Out-Json @{ ok = $true; arranged = $done }
   }
   'keys' {
     # A keyboard shortcut sent to one window (e.g. ctrl+s to save). It has to bring that window forward to do it.

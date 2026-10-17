@@ -424,3 +424,24 @@ def test_esc_stops_a_do_run_before_the_next_click(monkeypatch):
     assert clicks == ["File"]
     assert out["ok"] is False and out["stopped"] is True
     assert not navigator.active.is_set()
+
+
+def test_desktop_takes_the_window_however_the_model_names_it(monkeypatch):
+    """Local models send the window as `target`; that used to fail every arrange/close with 'Say which window'."""
+    from vyrse import desktop
+
+    sent = []
+    monkeypatch.setattr(desktop, "run", lambda req, timeout=30: sent.append(req) or {"ok": True})
+    monkeypatch.setattr(desktop, "_last_window", "")
+    for action in ("arrange", "close", "focus", "keys", "read"):
+        desktop.handle({"action": action, "target": "WindowsTerminal", "position": "left", "keys": "ctrl+s"})
+    assert [r.get("window") for r in sent] == ["WindowsTerminal"] * 5
+
+
+def test_desktop_never_closes_parts_of_windows_itself(monkeypatch):
+    from vyrse import desktop
+
+    monkeypatch.setattr(desktop, "run", lambda req, timeout=30: (_ for _ in ()).throw(AssertionError("must not run")))
+    for name in ("Program Manager", "NVIDIA GeForce Overlay", "Rainmeter", "taskbar"):
+        out = json.loads(desktop.handle({"action": "close", "window": name}))
+        assert out["ok"] is False

@@ -51,6 +51,7 @@ import {
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import type { Artifact } from "@/lib/vyrse/types";
+import { formMessage, type WorkspaceUpdate } from "@/services/hermes/workspace-interact";
 import { cn } from "@/lib/utils";
 import { Ring } from "./ArtifactKinds";
 import { CountUp, motionOff, stagger, useCountUp } from "./motion";
@@ -633,23 +634,24 @@ export function Weather({ data }: { data: NonNullable<Artifact["weather"]> }) {
 /* ------------------------------------------------------------------------------------------- timer */
 
 /** A focus countdown that runs by itself; a low bell sounds if it finishes while on screen. */
-export function Timer({ data }: { data: NonNullable<Artifact["timer"]> }) {
+export function Timer({ data, onUpdate }: { data: NonNullable<Artifact["timer"]>; onUpdate?: ((u: WorkspaceUpdate) => void) | undefined }) {
   const [now, setNow] = useState(() => Date.now());
-  const left = Math.max(0, data.ends_at - now);
-  const done = left <= 0;
+  const paused = data.paused_left !== undefined;
+  const left = paused ? data.paused_left! : Math.max(0, data.ends_at - now);
+  const done = !paused && left <= 0;
   const running = useRef(!done);
   useEffect(() => {
-    if (done) return;
+    if (done || paused) return;
     const id = setInterval(() => setNow(Date.now()), 250);
     return () => clearInterval(id);
-  }, [done, data.ends_at]);
+  }, [done, paused, data.ends_at]);
   useEffect(() => {
     if (!done) running.current = true;
     else if (running.current) {
       running.current = false;
-      playUiSound("done");
+      if (!data.stopped) playUiSound("done");
     }
-  }, [done]);
+  }, [done, data.stopped]);
   const secs = Math.ceil(left / 1000);
   // A countdown to a date (days away) reads as days and hours; a focus timer as minutes and seconds.
   const long = data.seconds >= 86_400;
@@ -659,6 +661,21 @@ export function Timer({ data }: { data: NonNullable<Artifact["timer"]> }) {
       : secs >= 3600
         ? `${Math.floor(secs / 3600)}:${String(Math.floor((secs % 3600) / 60)).padStart(2, "0")}:${String(secs % 60).padStart(2, "0")}`
         : `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, "0")}`;
+  const control = (label: string, action: "pause" | "resume" | "add" | "stop", primary = false) => (
+    <button
+      type="button"
+      onClick={() => {
+        playUiSound("tick-soft");
+        onUpdate?.({ op: "timer", args: action === "add" ? { action, minutes: 5 } : { action } });
+      }}
+      className={cn(
+        "rounded-full px-3 py-1 text-[12px] transition-colors focus-visible:outline-none",
+        primary ? "bg-primary text-primary-foreground hover:bg-primary/90" : "liquid-hover relative border border-border text-foreground/85 hover:text-foreground",
+      )}
+    >
+      {label}
+    </button>
+  );
   return (
     <div className="flex items-center gap-5">
       <Ring
@@ -670,15 +687,16 @@ export function Timer({ data }: { data: NonNullable<Artifact["timer"]> }) {
         <span>
           <span
             className={cn(
-              "block font-display leading-none font-semibold tabular-nums",
+              "block font-display leading-none font-semibold tabular-nums transition-opacity",
               !done && clock.length > 5 ? "text-[22px]" : "text-[28px]",
               done ? "text-success" : "text-foreground",
+              paused && "animate-pulse opacity-70",
             )}
           >
             {done ? "0:00" : clock}
           </span>
           <span className={cn("eyebrow mt-1 block", done && "text-success")}>
-            {done ? "done" : long ? "to go" : "left"}
+            {done ? (data.stopped ? "stopped" : "done") : paused ? "paused" : long ? "to go" : "left"}
           </span>
         </span>
       </Ring>
@@ -686,11 +704,26 @@ export function Timer({ data }: { data: NonNullable<Artifact["timer"]> }) {
         <p className="truncate font-display text-[16px] text-foreground">{data.label}</p>
         <p className="mt-1 font-mono text-[11px] text-muted-foreground">
           {done
-            ? "Time's up."
-            : long
-              ? `until ${new Date(data.ends_at).toLocaleDateString([], { weekday: "short", day: "numeric", month: "short" })}`
-              : `${fmt(data.seconds / 60)} min · ends ${new Date(data.ends_at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}`}
+            ? data.stopped ? "Stopped early." : "Time's up."
+            : paused
+              ? "On hold."
+              : long
+                ? `until ${new Date(data.ends_at).toLocaleDateString([], { weekday: "short", day: "numeric", month: "short" })}`
+                : `${fmt(data.seconds / 60)} min · ends ${new Date(data.ends_at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}`}
         </p>
+        {onUpdate && !long && (
+          <div data-card-chrome className="mt-3 flex flex-wrap gap-1.5">
+            {done ? (
+              control("+5 min", "add", true)
+            ) : (
+              <>
+                {paused ? control("Resume", "resume", true) : control("Pause", "pause", true)}
+                {control("+5 min", "add")}
+                {control("Stop", "stop")}
+              </>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );
@@ -698,15 +731,46 @@ export function Timer({ data }: { data: NonNullable<Artifact["timer"]> }) {
 
 /* ------------------------------------------------------------------------------------------- board */
 
-export function Board({ data }: { data: NonNullable<Artifact["board"]> }) {
+export function Board({ data, onUpdate }: { data: NonNullable<Artifact["board"]>; onUpdate?: ((u: WorkspaceUpdate) => void) | undefined }) {
+  // Drag a card to another column (or tap it, then tap where it goes: works on the phone too).
+  const [drag, setDrag] = useState<{ col: number; label: string } | null>(null);
+  const [over, setOver] = useState<number | null>(null);
+  const [picked, setPicked] = useState<{ col: number; label: string } | null>(null);
+  const move = (from: number, to: number, label: string) => {
+    setPicked(null);
+    if (from === to || !onUpdate) return;
+    playUiSound(/\b(done|complete|completed|finished)\b/i.test(data[to]?.name ?? "") ? "tick" : "tick-soft");
+    onUpdate({ op: "board_move", args: { from, to, label } });
+  };
   return (
     <div className="field-scroll-x -mx-1 flex gap-2.5 overflow-x-auto px-1 pb-1">
       {data.map((col, c) => {
         const done = /\b(done|complete|completed|finished)\b/i.test(col.name);
+        const target = (drag && drag.col !== c && over === c) || (picked && picked.col !== c);
         return (
           <div
             key={col.name}
-            className="vyr-rise flex min-w-[11.5rem] flex-1 flex-col rounded-2xl border border-border bg-secondary/15 p-2"
+            onDragOver={(e) => {
+              if (!drag) return;
+              e.preventDefault();
+              e.stopPropagation();
+              setOver(c);
+            }}
+            onDragLeave={() => setOver((o) => (o === c ? null : o))}
+            onDrop={(e) => {
+              if (!drag) return;
+              e.preventDefault();
+              e.stopPropagation();
+              move(drag.col, c, drag.label);
+              setDrag(null);
+              setOver(null);
+            }}
+            onClick={() => picked && picked.col !== c && move(picked.col, c, picked.label)}
+            className={cn(
+              "vyr-rise flex min-w-[9.25rem] flex-1 flex-col rounded-2xl border bg-secondary/15 p-2 transition-[border-color,background-color] duration-200",
+              target ? "border-primary/55 bg-primary/[0.06]" : "border-border",
+              picked && picked.col !== c && "cursor-pointer",
+            )}
             style={stagger(c)}
           >
             <div className="flex items-center justify-between gap-2 px-1.5 pb-2">
@@ -715,28 +779,55 @@ export function Board({ data }: { data: NonNullable<Artifact["board"]> }) {
                 {col.cards.length}
               </span>
             </div>
-            <div className="space-y-1.5">
-              {col.cards.map((k, i) => (
-                <div
-                  key={`${k.label}-${i}`}
-                  className="vyr-flip-up rounded-xl border border-border bg-card px-2.5 py-2"
-                  style={stagger(c + i + 1)}
-                >
-                  <p
+            <div className="min-h-[2.5rem] space-y-1.5">
+              {col.cards.map((k, i) => {
+                const isPicked = picked?.col === c && picked.label === k.label;
+                return (
+                  <div
+                    key={`${k.label}-${i}`}
+                    draggable={!!onUpdate}
+                    onDragStart={(e) => {
+                      e.stopPropagation(); // a task, not the whole card
+                      e.dataTransfer.effectAllowed = "move";
+                      setDrag({ col: c, label: k.label });
+                    }}
+                    onDragEnd={(e) => {
+                      e.stopPropagation();
+                      setDrag(null);
+                      setOver(null);
+                    }}
+                    onClick={(e) => {
+                      if (!onUpdate) return;
+                      e.stopPropagation();
+                      setPicked(isPicked ? null : { col: c, label: k.label });
+                    }}
                     className={cn(
-                      "text-[13px] leading-snug",
-                      done
-                        ? "text-muted-foreground line-through decoration-border-strong"
-                        : "text-foreground",
+                      "vyr-flip-up rounded-xl border bg-card px-2.5 py-2 transition-[border-color,box-shadow,opacity] duration-200",
+                      onUpdate && "cursor-grab active:cursor-grabbing",
+                      isPicked ? "border-primary/70 shadow-[0_0_0_3px] shadow-primary/15" : "border-border hover:border-border-strong",
+                      drag?.col === c && drag.label === k.label && "opacity-40",
                     )}
+                    style={stagger(c + i + 1)}
                   >
-                    {k.label}
-                  </p>
-                  {k.note && (
-                    <p className="mt-0.5 font-mono text-[10.5px] text-muted-foreground">{k.note}</p>
-                  )}
-                </div>
-              ))}
+                    <p
+                      className={cn(
+                        "text-[13px] leading-snug",
+                        done
+                          ? "text-muted-foreground line-through decoration-border-strong"
+                          : "text-foreground",
+                      )}
+                    >
+                      {k.label}
+                    </p>
+                    {k.note && (
+                      <p className="mt-0.5 font-mono text-[10.5px] text-muted-foreground">{k.note}</p>
+                    )}
+                    {isPicked && (
+                      <p className="mt-1 font-mono text-[10px] text-primary">tap a column to move it</p>
+                    )}
+                  </div>
+                );
+              })}
             </div>
           </div>
         );
@@ -983,7 +1074,10 @@ const APP_THEME: Record<string, string> = {
  * A page Hermes wrote (kind=app), in a sandboxed frame: scripts run, but with an opaque origin, no network
  * (the frame's CSP), no VYRSE bridge, no navigation or popups. It reports its height so the card fits it.
  */
-export function AppFrame({ html, title }: { html: string; title: string }) {
+export function AppFrame({ html, title, onSend }: { html: string; title: string; onSend?: ((text: string) => void) | undefined }) {
+  const lastSend = useRef(0);
+  const sendRef = useRef(onSend);
+  sendRef.current = onSend;
   const ref = useRef<HTMLIFrameElement>(null);
   const [height, setHeight] = useState(160);
   // The frame's colour scheme must match its page's, or the browser paints an opaque backdrop behind it.
@@ -998,6 +1092,13 @@ export function AppFrame({ html, title }: { html: string; title: string }) {
         Number.isFinite(d.height)
       )
         setHeight(Math.max(60, Math.min(1400, Math.ceil(d.height))));
+      // vyrse.send("…") from the page: a message to VYRSE as the user's (at most one every 3 s, kept short)
+      const m = e.data as { type?: unknown; text?: unknown } | null;
+      if (m?.type === "vyrse-app-send" && typeof m.text === "string" && m.text.trim() && sendRef.current) {
+        if (Date.now() - lastSend.current < 3000) return;
+        lastSend.current = Date.now();
+        sendRef.current(m.text.trim().slice(0, 400));
+      }
     };
     window.addEventListener("message", onMessage);
     return () => window.removeEventListener("message", onMessage);
@@ -1055,7 +1156,7 @@ function polar(r: number, deg: number): [number, number] {
  * A wheel that spins and lands on one option at random ("pick for me", a coin, a die). It spins once as it
  * arrives and again on "Spin again"; the pick is made here, never by the model.
  */
-export function Picker({ data, spinKey }: { data: NonNullable<Artifact["picker"]>; spinKey: string }) {
+export function Picker({ data, spinKey, onAsk }: { data: NonNullable<Artifact["picker"]>; spinKey: string; onAsk?: ((text: string) => void) | undefined }) {
   const options = data.options;
   const n = options.length;
   const slice = 360 / n;
@@ -1177,6 +1278,16 @@ export function Picker({ data, spinKey }: { data: NonNullable<Artifact["picker"]
         >
           Spin again
         </button>
+        {onAsk && picked !== null && !spinning && (
+          <button
+            data-card-chrome
+            type="button"
+            onClick={() => onAsk(`Let's go with ${options[picked]}.`)}
+            className="vyr-emerge mt-4 ml-2 rounded-full bg-primary px-4 py-1.5 text-[12.5px] font-medium text-primary-foreground hover:bg-primary/90"
+          >
+            Go with this
+          </button>
+        )}
       </div>
     </div>
   );
@@ -1401,5 +1512,98 @@ export function Folders({ data }: { data: NonNullable<Artifact["folders"]> }) {
         ))}
       </ul>
     </div>
+  );
+}
+
+/* -------------------------------------------------------------------------------------------- form */
+
+/** VYRSE asks for details on screen; Send hands them back as the user's message. */
+export function Form({
+  data,
+  title,
+  onSubmit,
+}: {
+  data: NonNullable<Artifact["form"]>;
+  title: string;
+  onSubmit?: ((values: Record<string, string>, message: string) => void) | undefined;
+}) {
+  const [values, setValues] = useState<Record<string, string>>(() => data.sent ?? {});
+  const [editing, setEditing] = useState(!data.sent);
+  useEffect(() => {
+    if (data.sent) {
+      setValues(data.sent);
+      setEditing(false);
+    }
+  }, [data.sent]);
+  const set = (label: string, v: string) => setValues((all) => ({ ...all, [label]: v }));
+  const filled = data.fields.some((f) => values[f.label]?.trim());
+  const field =
+    "w-full rounded-xl border border-border bg-background/40 px-3 py-2 text-[13.5px] text-foreground placeholder:text-muted-foreground/60 focus:border-primary/60 focus:outline-none disabled:opacity-70";
+  return (
+    <form
+      onSubmit={(e) => {
+        e.preventDefault();
+        if (!onSubmit || !filled) return;
+        playUiSound("tick");
+        setEditing(false);
+        onSubmit(values, formMessage(title, data.fields, values));
+      }}
+      className="space-y-3"
+    >
+      <div className="grid gap-3 sm:grid-cols-2">
+        {data.fields.map((f) => (
+          <label key={f.label} className={cn("block", (f.type === "text" && data.fields.length % 2 === 1 && f === data.fields[data.fields.length - 1]) && "sm:col-span-2")}>
+            <span className="eyebrow mb-1.5 block">{f.label}</span>
+            {f.type === "select" ? (
+              <span className="flex flex-wrap gap-1.5">
+                {f.options!.map((o) => (
+                  <button
+                    key={o}
+                    type="button"
+                    disabled={!editing}
+                    onClick={() => set(f.label, values[f.label] === o ? "" : o)}
+                    className={cn(
+                      "rounded-full border px-3 py-1 text-[12.5px] transition-colors",
+                      values[f.label] === o ? "border-primary/70 bg-primary/15 text-foreground" : "border-border text-muted-foreground enabled:hover:text-foreground",
+                    )}
+                  >
+                    {o}
+                  </button>
+                ))}
+              </span>
+            ) : (
+              <input
+                type={f.type}
+                value={values[f.label] ?? ""}
+                disabled={!editing}
+                placeholder={f.placeholder ?? ""}
+                onChange={(e) => set(f.label, e.target.value)}
+                className={cn(field, (f.type === "date" || f.type === "time") && "[color-scheme:inherit]")}
+              />
+            )}
+          </label>
+        ))}
+      </div>
+      {onSubmit && (
+        <div data-card-chrome className="flex items-center gap-2 pt-1">
+          {editing ? (
+            <button
+              type="submit"
+              disabled={!filled}
+              className="rounded-full bg-primary px-4 py-1.5 text-[12.5px] font-medium text-primary-foreground transition-opacity disabled:opacity-40"
+            >
+              {data.submit}
+            </button>
+          ) : (
+            <>
+              <span className="inline-flex items-center gap-1.5 font-mono text-[11px] text-success">sent</span>
+              <button type="button" onClick={() => setEditing(true)} className="liquid-hover relative rounded-full border border-border px-3 py-1 text-[12px] text-muted-foreground hover:text-foreground">
+                Change
+              </button>
+            </>
+          )}
+        </div>
+      )}
+    </form>
   );
 }

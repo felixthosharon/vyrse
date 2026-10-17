@@ -42,6 +42,12 @@ SCHEMA: Dict[str, Any] = {
                                "typed messages too), highContrast (bool), reducedMotion (bool), talkStyle (how you talk: "
                                "normal|vibe|fam|chill|hype|focus|pro|savage; e.g. 'switch to fam mode' -> talkStyle fam, "
                                "'vibe mode off' -> normal).",
+                # Fields spelled out: with a bare object schema, local models' grammar can only emit {}.
+                "properties": {
+                    **{k: {"type": "string", "enum": list(v)} for k, v in ui_state.CHOICES.items()},
+                    **{k: {"type": "boolean"} for k in ui_state.BOOLEANS},
+                    **{k: {"type": "number"} for k in ui_state.NUMBERS},
+                },
             },
             "panel": {"type": "string", "enum": list(PANELS), "description": "For action=open."},
             "query": {"type": "string", "description": "For action=open_conversation: words from its title."},

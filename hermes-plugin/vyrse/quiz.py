@@ -16,7 +16,8 @@ SCHEMA: Dict[str, Any] = {
     "description": (
         "Quiz the user (revision, 'quiz me', 'test me on my notes'), tracked live in VYRSE's workspace. "
         "action=start with subject and 3-10 questions, as text (one per line: 'question :: correct answer :: "
-        "topic') or questions [{question, answer, topic}] (the answer stays hidden); "
+        "topic :: option | option | option | option' — ALWAYS give 4 short options, one of them the correct answer; the "
+        "user taps one on screen) or questions [{question, answer, topic, choices}] (the answer stays hidden); "
         "it stays hidden), then ask the FIRST question only. When the user's reply answers the question, call "
         "action=answer with what they said and correct=true/false BEFORE you respond; the result tells you "
         "the next question to ask, or that the quiz is over and the scorecard is shown. A message that isn't an "
@@ -34,6 +35,7 @@ SCHEMA: Dict[str, Any] = {
                     "question": {"type": "string"},
                     "answer": {"type": "string", "description": "The correct answer (hidden from the user)."},
                     "topic": {"type": "string", "description": "Short topic name, for the weak-spot report."},
+                    "choices": {"type": "array", "items": {"type": "string"}, "description": "Optional multiple-choice options (include the answer)."},
                 }},
             },
             "text": {"type": "string", "description": "start: the questions as lines 'question :: answer :: topic' "
@@ -90,6 +92,8 @@ def quiz_artifact(quiz: Dict[str, Any]) -> Dict[str, Any]:
     questions: List[Dict[str, Any]] = []
     for q in quiz["questions"]:
         item: Dict[str, Any] = {"question": q["question"]}
+        if q.get("choices"):
+            item["choices"] = q["choices"]
         if "given" in q:
             item.update(answer=q["given"] or "(no answer)", correct=q["correct"])
             if not q["correct"] and q.get("answer"):
@@ -100,7 +104,65 @@ def quiz_artifact(quiz: Dict[str, Any]) -> Dict[str, Any]:
     art: Dict[str, Any] = {"id": QUIZ_ID, "title": quiz.get("title") or "Quiz", "kind": "quiz", "quiz": {"questions": questions}}
     if quiz.get("subject"):
         art["quiz"]["subject"] = quiz["subject"]
+    current = _next(quiz)
+    if current is not None:
+        art["quiz"]["current"] = current
     return art
+
+
+def _choices(raw: Any, answer: str) -> List[str]:
+    """Clean multiple-choice options; the right answer is always among them."""
+    items = raw if isinstance(raw, list) else re.split(r"\s*\|\s*", str(raw or ""))
+    out = [_text(c, 120) for c in items if _text(c, 120)][:6]
+    if out and answer and not any(_norm(c) == _norm(answer) for c in out):
+        out.insert(len(out) // 2, _text(answer, 120))
+    return out if len(out) >= 2 else []
+
+
+def _norm(text: str) -> str:
+    return re.sub(r"[^a-z0-9]+", " ", str(text).lower()).strip()
+
+
+def close_enough(given: str, expected: str) -> bool:
+    """The expected answer with a typo or a different ending ("mitchondrion" for "Mitochondria", "ribosome" for
+    "Ribosomes"), but not a different word that looks alike ("meiosis" isn't "mitosis")."""
+    g, e = _norm(given), _norm(expected)
+    if not g or not e or len(e) > 40:
+        return False
+    if g == e:
+        return True
+    stem = lambda w: re.sub(r"(ia|ion|ions|on|a|es|s)$", "", w)
+    g2, e2 = stem(g), stem(e)
+    allowed = 0 if len(e2) < 5 else 1 if len(e2) < 9 else 2
+    return _edits(g2, e2) <= allowed
+
+
+def _edits(a: str, b: str) -> int:
+    prev = list(range(len(b) + 1))
+    for i, ca in enumerate(a, 1):
+        cur = [i]
+        for j, cb in enumerate(b, 1):
+            cur.append(min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (ca != cb)))
+        prev = cur
+    return prev[-1]
+
+
+def picked(q: Dict[str, Any], said: str) -> Optional[str]:
+    """Which option the user chose: the option's text, or its letter/number ("B", "2", "option b")."""
+    choices = q.get("choices") or []
+    if not choices:
+        return None
+    s = _norm(said)
+    for c in choices:
+        if _norm(c) and (_norm(c) == s or _norm(c) in s):
+            return c
+    m = re.fullmatch(r"(?:option |answer |my answer is |it s )?([a-f]|[1-6])", s)
+    if m:
+        k = m.group(1)
+        i = ord(k) - 97 if k.isalpha() else int(k) - 1
+        if 0 <= i < len(choices):
+            return choices[i]
+    return None
 
 
 def scorecard_artifact(quiz: Dict[str, Any], review: str = "") -> Dict[str, Any]:
@@ -165,15 +227,22 @@ def _start(session: str, params: Dict[str, Any]) -> str:
     questions = []
     for q in (params.get("questions") or [])[:20]:
         if isinstance(q, dict) and _text(q.get("question"), 300):
-            questions.append({"question": _text(q["question"], 300), "answer": _text(q.get("answer"), 200),
-                              "topic": _text(q.get("topic"), 60)})
+            answer = _text(q.get("answer"), 200)
+            questions.append({"question": _text(q["question"], 300), "answer": answer,
+                              "topic": _text(q.get("topic"), 60), "choices": _choices(q.get("choices"), answer)})
         elif isinstance(q, str) and q.strip():
             questions.append({"question": _text(q, 300), "answer": "", "topic": ""})
     from .workspace import pairs_from_text
 
-    for fields in pairs_from_text(str(params.get("text") or ""), parts=3)[: 20 - len(questions)]:
-        questions.append({"question": _text(fields[0], 300), "answer": _text(fields[1], 200),
-                          "topic": _text(fields[2], 60) if len(fields) > 2 else ""})
+    for fields in pairs_from_text(str(params.get("text") or ""), parts=10)[: 20 - len(questions)]:
+        answer = _text(fields[1], 200)
+        questions.append({"question": _text(fields[0], 300), "answer": answer,
+                          "topic": _text(fields[2], 60) if len(fields) > 2 else "",
+                          # 'choice | choice' is split by the line parser too, so every field after the topic is an option
+                          "choices": _choices(fields[3:] if len(fields) > 4 else (fields[3] if len(fields) > 3 else ""), answer)})
+    for q in questions:
+        if not q.get("choices"):
+            q.pop("choices", None)
     if not questions:
         return _err("start needs text: one question per line, like \"What is SN2? :: one-step substitution :: "
                     "Mechanisms\\nWhat is chirality? :: non-superimposable mirror images :: Stereochemistry\"")
@@ -184,7 +253,9 @@ def _start(session: str, params: Dict[str, Any]) -> str:
     _show(quiz_artifact(quiz))
     return json.dumps({"success": True, "result": (
         f"Quiz card shown ({len(questions)} questions). Write your reply to the user now as plain text (no more "
-        f"tools): a short intro and question 1: \"{questions[0]['question']}\"")})
+        f"tools): a short intro and question 1: \"{questions[0]['question']}\""
+        + (" (its options are buttons on the card: don't list them; the user taps one or says it)" if questions[0].get("choices") else "")
+        + "")})
 
 
 def _answer(session: str, params: Dict[str, Any]) -> str:
@@ -207,7 +278,17 @@ def _answer(session: str, params: Dict[str, Any]) -> str:
                     "what they actually said (plain text, no tools); the quiz waits.")
     quiz["open"] = False
     q = quiz["questions"][index]
-    q.update(given=_text(params.get("answer"), 200), correct=params["correct"])
+    given = _text(params.get("answer"), 200)
+    correct = params["correct"]
+    # A multiple-choice answer is marked here, not by the model: the option they picked either is the answer or isn't.
+    choice = picked(q, given) or (picked(q, said) if said else None)
+    if choice is not None and q.get("answer"):
+        given, correct = choice, _norm(choice) == _norm(q["answer"])
+    elif not correct and close_enough(given, q.get("answer", "")):
+        # the right answer, misspelt ("mitchondrion"): it counts, with the spelling shown
+        correct = True
+        params["note"] = f"Right (it's spelt {q['answer']})."
+    q.update(given=given, correct=correct)
     if params.get("note"):
         q["note"] = _text(params["note"], 300)
     save(session, quiz)
@@ -316,6 +397,14 @@ def pre_llm_call(platform: str = "", session_id: str = "", user_message: Any = "
         quiz.update(open=False, off_topic=0, dormant=False)
         save(session_id, quiz)
         return {"context": f"[Back to the quiz: ask question {index + 1} again: \"{q['question']}\". Don't call vyrse_quiz yet.]"}
+    # A multiple-choice answer (tapped in the card: "My answer: …", or typed as the option / its letter) is
+    # marked right here, so it never depends on the model calling the tool.
+    tapped = re.match(r"\s*my answer:\s*(.+)$", said, re.I | re.S)
+    choice = picked(q, tapped.group(1)) if tapped else picked(q, said)
+    if choice is not None and not tapped and len(_norm(said)) > len(_norm(choice)) + 14:
+        choice = None  # a longer message that only mentions an option isn't picking it
+    if choice is not None and q.get("answer"):
+        return _mark_choice(session_id, quiz, index, choice)
     if not is_answer(said) or not on_topic(said, q["question"], q.get("answer", "")):
         # Off topic: the quiz pauses. After two such messages in a row it goes quiet until they come back to it.
         was_dormant = bool(quiz.get("dormant"))
@@ -336,6 +425,35 @@ def pre_llm_call(platform: str = "", session_id: str = "", user_message: Any = "
         f"(expected: {q.get('answer') or 'judge it yourself'}). If this message answers it, FIRST call "
         "vyrse_quiz action=answer with their answer and correct=true/false; then reply as the tool result says. "
         "If they want to stop, call action=stop.]")}
+
+
+def _mark_choice(session_id: str, quiz: Dict[str, Any], index: int, choice: str) -> Dict[str, str]:
+    from .workspace import deliver
+
+    q = quiz["questions"][index]
+    right = _norm(choice) == _norm(q["answer"])
+    q.update(given=choice, correct=right)
+    quiz.update(open=False, off_topic=0, dormant=False)
+    following = _next(quiz)
+    verdict = "RIGHT" if right else f"WRONG (the answer is {q['answer']})"
+    deliver({"action": "workspace", "op": "show", "artifact": quiz_artifact(quiz)}, session=session_id)
+    if following is None:
+        card = scorecard_artifact(quiz)
+        save(session_id, None)
+        deliver({"action": "workspace", "op": "show", "artifact": card}, session=session_id)
+        s = card["scorecard"]
+        weak = [t["label"] for t in s["topics"] if t["weak"]]
+        return {"context": (
+            f"[Quiz: for question {index + 1} the user picked \"{choice}\": {verdict}. That was the last one; it's "
+            f"recorded and the scorecard ({s['score']}/{s['total']}) is on screen. Don't call vyrse_quiz. Reply in two "
+            f"sentences: whether this one was right" + (", one line why" if not right else "") + ", then their score"
+            + (f" and that {', '.join(weak)} is the thing to revise." if weak else ".") + "]")}
+    save(session_id, quiz)
+    return {"context": (
+        f"[Quiz: for question {index + 1} the user picked \"{choice}\": {verdict}. It's recorded and shown on the "
+        f"card. Don't call vyrse_quiz. Reply briefly: " + ("well done" if right else "correct them in one line") +
+        f", then ask question {following + 1}: \"{quiz['questions'][following]['question']}\" (its options are on "
+        "screen; don't list them).]")}
 
 
 _WRONG = re.compile(r"\b(not (quite |exactly )?(right|correct)|incorrect|wrong|close,? but|isn't (right|correct)|that's not|"

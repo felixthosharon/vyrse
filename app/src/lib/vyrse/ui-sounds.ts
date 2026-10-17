@@ -17,18 +17,18 @@
 
 export type UiSound =
   | "arrive" | "spin" | "land" | "tick" | "tick-soft" | "wrong" | "result" | "done"
-  | "ask" | "deny" | "flip" | "learned" | "alert" | "reminder" | "alarm";
+  | "ask" | "deny" | "flip" | "learned" | "alert" | "reminder" | "alarm" | "reply";
 const BACKGROUND = new Set<UiSound>(["alert", "reminder", "alarm"]);
 
 // Relative levels (the files are loudness-matched): the bell carries furthest, so it's the quietest.
 const LEVEL: Record<UiSound, number> = {
   arrive: 0.5, spin: 0.35, land: 0.55, tick: 0.5, "tick-soft": 0.45, wrong: 0.45, result: 0.6, done: 0.45,
-  ask: 0.5, deny: 0.45, flip: 0.4, learned: 0.55, alert: 0.7, reminder: 0.65, alarm: 0.8,
+  ask: 0.5, deny: 0.45, flip: 0.4, learned: 0.55, alert: 0.7, reminder: 0.65, alarm: 0.8, reply: 0.4,
 };
 // Shortest gap between two plays of the same sound, and between any two sounds.
 const COOLDOWN_MS: Record<UiSound, number> = {
   arrive: 1800, spin: 800, land: 800, tick: 250, "tick-soft": 250, wrong: 600, result: 2000, done: 3000,
-  ask: 1500, deny: 800, flip: 150, learned: 3000, alert: 4000, reminder: 3000, alarm: 0,
+  ask: 1500, deny: 800, flip: 150, learned: 3000, alert: 4000, reminder: 3000, alarm: 0, reply: 4000,
 };
 const ANY_GAP_MS = 120;
 

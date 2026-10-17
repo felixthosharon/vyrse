@@ -29,6 +29,9 @@
             // Storage throws in an opaque origin: give pages an in-memory stand-in so they still work.
             "<script>(function(){function mem(){var m={};return{getItem:function(k){return Object.prototype.hasOwnProperty.call(m,k)?m[k]:null},setItem:function(k,v){m[k]=String(v)},removeItem:function(k){delete m[k]},clear:function(){m={}},key:function(i){return Object.keys(m)[i]||null},get length(){return Object.keys(m).length}}}" +
             "['localStorage','sessionStorage'].forEach(function(n){try{window[n].getItem('x')}catch(e){try{Object.defineProperty(window,n,{value:mem(),configurable:true})}catch(_){}}})})()<\/script>";
+          // vyrse.send("…"): the page tells VYRSE something, as the user's message (VYRSE limits how often).
+          head +=
+            "<script>window.vyrse={send:function(t){parent.postMessage({type:'vyrse-app-send',text:String(t).slice(0,400)},'*')}}<\/script>";
           var report =
             "<script>(function(){function r(){var b=document.body;if(!b)return;var s=getComputedStyle(b);parent.postMessage({type:'vyrse-app-height',height:Math.ceil(b.getBoundingClientRect().bottom+parseFloat(s.marginBottom||'0'))+2},'*')}" +
             "addEventListener('load',r);try{new ResizeObserver(r).observe(document.documentElement)}catch(e){}setTimeout(r,60);setInterval(r,1200)})()<\/script>";

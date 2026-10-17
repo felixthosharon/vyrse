@@ -1,0 +1,46 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  :root { --fg: #eef2f6; --muted: #9aa4b2; --accent: #5fd4ee; --hot: #ff2d95; }
+  body { margin: 0; width: 300px; font: 13px/1.5 "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif; color: var(--fg);
+    background: radial-gradient(120% 80% at 20% -10%, #17222e, #07090c 60%); overflow: hidden; }
+  .glow { position: absolute; width: 220px; height: 160px; right: -60px; top: -50px; border-radius: 50%;
+    background: radial-gradient(closest-side, rgba(95,212,238,.22), transparent); filter: blur(10px); animation: drift 9s ease-in-out infinite alternate; }
+  @keyframes drift { to { transform: translate(-70px, 40px) scale(1.2); } }
+  .wrap { position: relative; padding: 18px 18px 16px; }
+  header { display: flex; align-items: center; gap: 12px; }
+  header img { width: 38px; height: 38px; border-radius: 10px; box-shadow: 0 6px 18px rgba(0,0,0,.5); }
+  h1 { margin: 0; font-size: 15px; font-weight: 650; letter-spacing: .02em; }
+  .ver { color: var(--muted); font: 11px/1 "Cascadia Mono", Consolas, monospace; }
+  .status { display: flex; align-items: center; gap: 9px; margin-top: 16px; padding: 10px 12px; border-radius: 12px;
+    background: rgba(255,255,255,.05); box-shadow: inset 0 1px 0 rgba(255,255,255,.08); font-weight: 600; }
+  .dot { width: 9px; height: 9px; border-radius: 50%; background: #5b6470; flex: none; }
+  .on .dot { background: var(--accent); box-shadow: 0 0 0 4px rgba(95,212,238,.18), 0 0 12px var(--accent); }
+  .off .dot { background: var(--hot); box-shadow: 0 0 10px var(--hot); }
+  p { margin: 10px 2px 0; color: var(--muted); }
+  ul { margin: 8px 0 0; padding-left: 18px; color: var(--muted); }
+  li { margin: 2px 0; }
+  b { color: var(--fg); font-weight: 600; }
+  button { display: none; margin-top: 12px; width: 100%; padding: 9px 12px; border: 0; border-radius: 10px; cursor: pointer;
+    font: 600 13px/1 inherit; color: #061016; background: linear-gradient(135deg, #7fe3f4, #5fd4ee); box-shadow: 0 6px 18px rgba(95,212,238,.25); }
+  button:hover { filter: brightness(1.08); }
+</style>
+</head>
+<body>
+<div class="glow"></div>
+<div class="wrap">
+  <header><img src="icons/128.png" alt=""><div><h1>VYRSE</h1><div class="ver" id="ver"></div></div></header>
+  <div class="status" id="s"><span class="dot"></span><span id="t">Checking…</span></div>
+  <p id="d"></p>
+  <button id="update" type="button">Update ready: open extensions to reload</button>
+  <ul id="tips">
+    <li>“<b>Highlight</b> where I click to export this as PDF”</li>
+    <li>“<b>Do it</b> for me”</li>
+    <li>“Read this page” · “open my Gmail”</li>
+  </ul>
+</div>
+<script src="popup.js"></script>
+</body>
+</html>

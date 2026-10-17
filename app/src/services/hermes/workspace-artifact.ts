@@ -1,4 +1,4 @@
-import type { Artifact } from "@/lib/vyrse/types";
+import type { Artifact, FormField } from "@/lib/vyrse/types";
 
 /**
  * Validates a workspace artifact sent by the vyrse plugin's `vyrse_workspace` tool. Only typed data
@@ -11,7 +11,15 @@ export function parseArtifact(raw: unknown): Artifact | null {
   const id = str(a["id"], 48);
   const title = str(a["title"], 120);
   if (!id || !title) return null;
-  const base = { id, title, ...(str(a["caption"], 240) ? { caption: str(a["caption"], 240) } : {}) };
+  const actions = arr(a["actions"]).map(obj).filter(Boolean).slice(0, 4).flatMap((b) =>
+    str(b!["label"], 40) && str(b!["prompt"], 300) ? [{ label: str(b!["label"], 40), prompt: str(b!["prompt"], 300) }] : [],
+  );
+  const base = {
+    id,
+    title,
+    ...(str(a["caption"], 240) ? { caption: str(a["caption"], 240) } : {}),
+    ...(actions.length ? { actions } : {}),
+  };
 
   switch (a["kind"]) {
     case "series": {
@@ -136,6 +144,7 @@ export function parseArtifact(raw: unknown): Artifact | null {
           ...(typeof i!["correct"] === "boolean" ? { correct: i!["correct"] as boolean } : {}),
           ...(str(i!["right_answer"], 200) ? { right_answer: str(i!["right_answer"], 200) } : {}),
           ...(str(i!["note"], 300) ? { note: str(i!["note"], 300) } : {}),
+          ...(choices(i!["choices"]).length >= 2 ? { choices: choices(i!["choices"]) } : {}),
         }];
       });
       const subject = str(q?.["subject"], 60);
@@ -209,7 +218,40 @@ export function parseArtifact(raw: unknown): Artifact | null {
       const endsAt = num(t?.["ends_at"]);
       const seconds = num(t?.["seconds"]);
       if (endsAt === null || seconds === null || seconds <= 0) return null;
-      return { ...base, kind: "timer", timer: { label: str(t?.["label"], 120) || title, ends_at: endsAt, seconds } };
+      const pausedLeft = num(t?.["paused_left"]);
+      return {
+        ...base,
+        kind: "timer",
+        timer: {
+          label: str(t?.["label"], 120) || title,
+          ends_at: endsAt,
+          seconds,
+          ...(pausedLeft !== null && pausedLeft >= 0 ? { paused_left: pausedLeft } : {}),
+          ...(t?.["stopped"] === true ? { stopped: true } : {}),
+        },
+      };
+    }
+    case "form": {
+      const f = obj(a["form"]);
+      const fields = arr(f?.["fields"]).map(obj).filter(Boolean).slice(0, 10).flatMap((x): FormField[] => {
+        const label = str(x!["label"], 60);
+        const type = x!["type"];
+        if (!label) return [];
+        const kind: FormField["type"] = type === "number" || type === "date" || type === "time" || type === "select" ? type : "text";
+        const options = arr(x!["options"]).map((o) => str(o, 40)).filter(Boolean).slice(0, 12);
+        if (kind === "select" && options.length < 2) return [{ label, type: "text" as const }];
+        return [{
+          label,
+          type: kind,
+          ...(kind === "select" ? { options } : {}),
+          ...(str(x!["placeholder"], 60) ? { placeholder: str(x!["placeholder"], 60) } : {}),
+        }];
+      });
+      const sentRaw = obj(f?.["sent"]);
+      const sent = sentRaw ? Object.fromEntries(Object.entries(sentRaw).slice(0, 10).map(([k, v]) => [k.slice(0, 60), str(v, 300)])) : null;
+      return fields.length
+        ? { ...base, kind: "form", form: { fields, submit: str(f?.["submit"], 30) || "Send", ...(sent ? { sent } : {}) } }
+        : null;
     }
     case "board": {
       const board = arr(a["board"]).map(obj).filter(Boolean).slice(0, 6).flatMap((col) => {
@@ -266,6 +308,10 @@ export function parseArtifact(raw: unknown): Artifact | null {
     default:
       return null;
   }
+}
+
+function choices(v: unknown): string[] {
+  return arr(v).map((c) => str(c, 120)).filter(Boolean).slice(0, 6);
 }
 
 function numbers(v: unknown, max: number): number[] {

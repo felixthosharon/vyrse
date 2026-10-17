@@ -2,7 +2,8 @@
 //   start           start → ready → quit
 //   crash           kill the real server once, expect recovery
 //   crash-launcher  kill only the venv launcher stub, expect recovery (previously orphaned the server)
-//   probe           create a "vyrse" session over the gateway, run one prompt, report events, quit
+//   probe           create a "vyrse" session over the gateway, run one prompt (VYRSE_SMOKE_PROMPT or a terminal
+//                   echo), report events and tool calls, quit
 //   window          open the real UI window, screenshot it to VYRSE_SMOKE_SHOT, quit
 //   ui              type VYRSE_SMOKE_PROMPT into the real composer, wait for Hermes, screenshot, quit
 
@@ -100,18 +101,18 @@ async function probeTurn(conn: BackendConnection): Promise<void> {
       if (type === 'session.info' && payload?.tools && Object.keys(payload.tools).length) {
         console.log(`[smoke] toolsets ${JSON.stringify(payload.tools)}`)
       }
-      if (type === 'tool.start') console.log(`[smoke] tool.start ${payload?.name}`)
-      if (type === 'tool.complete') console.log(`[smoke] tool.complete ${payload?.name} ${payload?.duration_s ?? ''}s`)
+      if (type === 'tool.start') console.log(`[smoke] tool.start ${payload?.name} ${JSON.stringify(payload?.args ?? payload?.arguments ?? payload?.input ?? '').slice(0, 300)}`)
+      if (type === 'tool.complete') console.log(`[smoke] tool.complete ${payload?.name} ${payload?.duration_s ?? ''}s ${JSON.stringify(payload?.result ?? payload?.output ?? '').slice(0, 300)}`)
       if (type === 'message.complete') resolve(payload)
     }
   })
   await call('prompt.submit', {
     session_id: sid,
-    text: 'Use the terminal tool to run `echo vyrse-probe`, then reply with one short sentence.',
+    text: process.env.VYRSE_SMOKE_PROMPT || 'Use the terminal tool to run `echo vyrse-probe`, then reply with one short sentence.',
   })
   const complete = await done
   console.log(`[smoke] first delta after ${firstDelta ? firstDelta - started : -1} ms, total ${Date.now() - started} ms`)
-  console.log(`[smoke] status=${complete?.status} text=${JSON.stringify((complete?.text ?? text).slice(0, 200))}`)
+  console.log(`[smoke] status=${complete?.status} text=${JSON.stringify((complete?.text ?? text).slice(0, 900))}`)
   console.log(`[smoke] events ${JSON.stringify(events)}`)
   socket.close()
 }

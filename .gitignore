@@ -23,3 +23,6 @@ keystore.properties
 # Personal voice data (your own recordings and models trained on them): kept locally, never published.
 assets/personal/
 app/.tanstack/
+chrome-extension/config.js
+desktop/release-next/
+desktop/release-prev/

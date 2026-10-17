@@ -81,12 +81,34 @@ def fired_since(since: float, limit: int = 10) -> List[Dict[str, Any]]:
             runs.append((mtime, doc))
     out = []
     for mtime, doc in sorted(runs)[-limit:]:
+        if _stale_repeat(doc.parent.name):
+            continue
         try:
             parsed = parse_run(doc.read_text(encoding="utf-8", errors="replace"))
         except OSError:
             continue
         out.append({"job_id": doc.parent.name, "at": mtime, **parsed})
     return out
+
+
+STALE_REPEAT_S = 2 * 3600
+
+
+def _stale_repeat(job_id: str) -> bool:
+    """A repeating reminder that only ran because the PC was off at its time, hours ago, isn't worth saying (its
+    next time comes round anyway). One-time reminders are still delivered late: those would otherwise be lost."""
+    try:
+        from cron.jobs import get_job
+
+        job = get_job(job_id) or {}
+    except Exception:
+        return False
+    times = (job.get("repeat") or {}).get("times")
+    kind = str((job.get("schedule") or {}).get("kind") or "")
+    if times == 1 or kind in ("once", "at", "date"):
+        return False
+    late = job.get("last_dispatch") or {}
+    return late.get("kind") == "catch_up" and float(late.get("lateness_seconds") or 0) > STALE_REPEAT_S
 
 
 # --- the vyrse_reminders tool -------------------------------------------------------------------------
@@ -131,8 +153,31 @@ SCHEMA: Dict[str, Any] = {
 _FRAME = (
     "You are VYRSE, the user's assistant, delivering a scheduled reminder or routine. Your reply is shown and "
     "read aloud to the user as it is: address them directly, warmly and briefly (one to three sentences), and "
-    "do any lookups the task needs first. Task: "
+    "do any lookups the task needs first. Don't create or change reminders and don't save memories: just write "
+    "the message. Task: "
 )
+
+# A reminder repeats only when the user asked for a repeat; models turn "remind me about my test tomorrow" into
+# "every day at 9am" (which then nagged daily). Repeats closer than 30 minutes need the user to have said minutes.
+_REPEAT_ASKED = re.compile(r"\b(every|each|daily|weekly|monthly|hourly|weekdays?|weekends?|always|routine|recurring|"
+                           r"regularly|repeat|again and again|on (?:mon|tue|wed|thu|fri|sat|sun)\w*s)\b", re.I)
+_RECURRING = re.compile(r"^\s*(every|each|daily|weekdays?|weekends?|hourly)\b|^\s*[\d*/,-]+(\s+[\d*/,-]+){4}\s*$", re.I)
+_EVERY_N = re.compile(r"every\s+(\d+)\s*(m|min|mins|minutes?|h|hr|hrs|hours?)\b", re.I)
+
+
+def _repeat_rules(args: Dict[str, Any], said: str) -> str:
+    """Adjust a new reminder to what the user asked. Returns a note for the model ('' if nothing changed)."""
+    schedule = str(args.get("schedule") or "")
+    if not _RECURRING.search(schedule):
+        return ""
+    if said and not _REPEAT_ASKED.search(said):
+        args["repeat"] = 1  # one reminder, at the first time that schedule names
+        return "Made it a one-time reminder (they didn't ask for it to repeat)."
+    m = _EVERY_N.search(schedule)
+    if m and m.group(2).lower().startswith("m") and int(m.group(1)) < 30 and not re.search(r"\bmin", said, re.I):
+        args["schedule"] = "every 30m"
+        return "Repeats every 30 minutes at most (they didn't ask for minutes)."
+    return ""
 
 
 def _clock(text: str):
@@ -153,6 +198,31 @@ def _clock(text: str):
     now = dt.datetime.now()
     at = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
     return at if at > now else at + dt.timedelta(days=1)
+
+
+_DAY_AT = re.compile(r"^\s*(today|tonight|tomorrow|tmrw|tmr)?\s*(?:at\s+)?(\d{1,2}(?::\d{2})?\s*(?:[ap]\.?m\.?)?)\s*"
+                     r"(today|tonight|tomorrow|tmrw|tmr)?\s*$", re.I)
+
+
+def _plain_time(schedule: str) -> str:
+    """'tomorrow at 9am', 'today 6pm', 'at 7:30' -> an ISO time Hermes' scheduler takes (else unchanged)."""
+    import datetime as dt
+
+    m = _DAY_AT.match(schedule or "")
+    if not m or not (m.group(1) or m.group(3) or re.search(r"\bat\b|[ap]\.?m|:", schedule, re.I)):
+        return schedule
+    at = _clock(m.group(2))
+    if at is None:
+        return schedule
+    day = (m.group(1) or m.group(3) or "").lower()
+    today = dt.datetime.now().date()
+    if day in ("tomorrow", "tmrw", "tmr"):
+        at = at.replace(year=today.year, month=today.month, day=today.day) + dt.timedelta(days=1)
+    elif day in ("today", "tonight"):
+        at = at.replace(year=today.year, month=today.month, day=today.day)
+        if day == "tonight" and at.hour < 12:
+            at += dt.timedelta(hours=12)
+    return at.strftime("%Y-%m-%dT%H:%M:00")
 
 
 def _alarm_card(at) -> None:
@@ -178,7 +248,12 @@ def handle(params: Dict[str, Any], **kw: Any) -> str:
         return json.dumps({"success": False, "error": "vyrse_reminders only works in the VYRSE desktop app."})
     args = {k: params[k] for k in ("action", "schedule", "prompt", "name", "job_id", "repeat") if params.get(k) not in (None, "")}
     alarm_at = None
-    if args.get("action") == "create" and params.get("alarm") is True:
+    from .turn import said
+
+    wants_alarm = params.get("alarm") is True and (not said() or re.search(r"\balarm|\bwake\b|wake me|ring", said(), re.I))
+    if args.get("action") in ("create", "update") and args.get("schedule"):
+        args["schedule"] = _plain_time(str(args["schedule"]))
+    if args.get("action") == "create" and wants_alarm:
         alarm_at = _clock(str(args.get("schedule") or ""))
         if alarm_at is not None:
             args["schedule"] = alarm_at.strftime("%Y-%m-%dT%H:%M:00")
@@ -187,6 +262,9 @@ def handle(params: Dict[str, Any], **kw: Any) -> str:
         args["name"] = f"Alarm · {when}" if not str(args.get("name") or "").startswith("Alarm") else args["name"]
         args.setdefault("prompt", f"It's {when}: the user's alarm. Wake them up in one short, warm sentence (mention anything "
                                   "they said it was for).")
+    note = ""
+    if args.get("action") == "create" and alarm_at is None:
+        note = _repeat_rules(args, said())
     if args.get("action") in ("create", "update"):
         args["deliver"] = "local"
         if args.get("prompt") and not str(args["prompt"]).startswith(_FRAME):
@@ -202,6 +280,13 @@ def handle(params: Dict[str, Any], **kw: Any) -> str:
                 ok = False
             if ok:
                 _alarm_card(alarm_at)
+        if note:
+            try:
+                data = json.loads(out)
+                data["note"] = note
+                out = json.dumps(data)
+            except (ValueError, TypeError):
+                pass
         return out
     except Exception as exc:
         return json.dumps({"success": False, "error": f"Couldn't update reminders: {exc}"})

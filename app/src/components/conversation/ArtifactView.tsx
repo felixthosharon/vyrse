@@ -1,16 +1,17 @@
+import type { WorkspaceUpdate } from "@/services/hermes/workspace-interact";
 import {
-  AppWindow, BarChart3, Check, ChevronDown, CircleDot, CloudSun, Code2, Copy, FileText, Gauge, GitCommitVertical,
-  GraduationCap, Grid3x3, Hash, Image as ImageIcon, Layers, LayoutGrid, LineChart as LineChartIcon, ListChecks,
-  ListOrdered, Maximize2, Minimize2, FolderTree, Network, NotebookPen, PieChart, Shuffle, SquareKanban, Table2, Timer as TimerIcon, Trophy, X,
-  type LucideIcon,
+  AppWindow, BarChart3, Check, ChevronDown, CircleDot, CloudSun, Code2, Copy, FileText, FolderTree, Gauge, GitCommitVertical, GraduationCap, Grid3x3, Hash, Image as ImageIcon, ImageDown, Layers, LayoutGrid, LineChart as LineChartIcon, ListChecks, ListOrdered, Maximize2, Minimize2, MoreHorizontal, Network, NotebookPen, PieChart, Pin, Shuffle, Sparkles, SquareKanban, Table2, TextCursorInput, Timer as TimerIcon, Trophy, X, type LucideIcon,
 } from "lucide-react";
-import { type ReactNode, useEffect, useState } from "react";
+import { type ReactNode, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
+import { toBlob } from "html-to-image";
+import type { CardSize, ChartStyle } from "./board-layout";
 import type { Artifact } from "@/lib/vyrse/types";
 import { cn } from "@/lib/utils";
 import { Markdown } from "./Markdown";
 import { Checklist, Donut, Flashcards, ProgressBar, Quiz, Rings, Scorecard, Stats, StatusTiles, artifactText } from "./ArtifactKinds";
 import { stagger } from "./motion";
-import { AppFrame, Bars, Board, Columns, Folders, Gauges, Heatmap, InfoCards, LineChart, LogView, MindMap, Picker, Timer, Weather } from "./WorkspaceKinds";
+import { AppFrame, Bars, Board, Columns, Folders, Gauges, Heatmap, InfoCards, LineChart, LogView, MindMap, Picker, Timer, Weather, Form } from "./WorkspaceKinds";
 
 const KIND_META: Record<string, { icon: LucideIcon; label: string }> = {
   line: { icon: LineChartIcon, label: "chart" },
@@ -43,6 +44,7 @@ const KIND_META: Record<string, { icon: LucideIcon; label: string }> = {
   picker: { icon: Shuffle, label: "picker" },
   mindmap: { icon: Network, label: "mind map" },
   folders: { icon: FolderTree, label: "files" },
+  form: { icon: TextCursorInput, label: "your details" },
 };
 
 function kindKey(a: Artifact): string {
@@ -74,6 +76,8 @@ export function ArtifactView({
   zoomed = false,
   fresh = false,
   onAsk,
+  onUpdate,
+  board,
 }: {
   artifact: Artifact;
   onRemove?: (() => void) | undefined;
@@ -83,9 +87,61 @@ export function ArtifactView({
   fresh?: boolean;
   /** send a follow-up to VYRSE (the workspace offers one or two that fit the item) */
   onAsk?: ((text: string) => void) | undefined;
+  /** the user changed the item (timer controls, a board card moved, a form sent) */
+  onUpdate?: ((update: WorkspaceUpdate) => void) | undefined;
+  /** the board's arrangement of this card (only on the workspace board) */
+  board?: {
+    size: CardSize;
+    pinned: boolean;
+    chart?: ChartStyle;
+    onSize: (size: CardSize) => void;
+    onPin: () => void;
+    onChart: (style: ChartStyle) => void;
+  };
 }) {
   const [open, setOpen] = useState(true);
   const [copied, setCopied] = useState(false);
+  const [menu, setMenu] = useState(false);
+  const [menuAt, setMenuAt] = useState<{ top: number; right: number } | null>(null);
+  const menuButton = useRef<HTMLSpanElement>(null);
+  const menuList = useRef<HTMLSpanElement>(null);
+  const [saved, setSaved] = useState<string | null>(null);
+  const figure = useRef<HTMLElement>(null);
+  // the chart type the user picked from the menu, else what VYRSE chose
+  const chartStyle = board?.chart ?? artifact.chart?.style;
+  useEffect(() => {
+    if (!menu) return;
+    const r = menuButton.current?.getBoundingClientRect();
+    if (r) setMenuAt({ top: r.bottom + 6, right: Math.max(8, window.innerWidth - r.right) });
+    const close = (e: PointerEvent) => {
+      const t = e.target as Node;
+      if (!menuButton.current?.contains(t) && !menuList.current?.contains(t)) setMenu(false);
+    };
+    window.addEventListener("pointerdown", close, true);
+    return () => window.removeEventListener("pointerdown", close, true);
+  }, [menu]);
+
+  /** The card as a PNG (the body only, no buttons), copied to the clipboard or saved. */
+  const image = async (how: "copy" | "save") => {
+    setMenu(false);
+    const node = figure.current;
+    if (!node) return;
+    const bg = getComputedStyle(document.body).backgroundColor;
+    const blob = await toBlob(node, { pixelRatio: 2, backgroundColor: bg, filter: (el) => !(el instanceof HTMLElement && el.dataset["cardChrome"] !== undefined) }).catch(() => null);
+    if (!blob) return;
+    if (how === "copy") {
+      await navigator.clipboard?.write?.([new ClipboardItem({ "image/png": blob })]).catch(() => undefined);
+      setSaved("Copied as image");
+    } else {
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = `${(artifact.title || "workspace").replace(/[\\/:*?"<>|]+/g, " ").trim().slice(0, 60)}.png`;
+      a.click();
+      window.setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+      setSaved("Saved as image");
+    }
+    window.setTimeout(() => setSaved(null), 1600);
+  };
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     if (!artifact.at) return;
@@ -107,6 +163,7 @@ export function ArtifactView({
 
   return (
     <figure
+      ref={figure}
       className={cn(
         "vyr-card-in vyr-liquid-card group/card relative my-0 overflow-hidden rounded-[1.25rem] border border-border bg-card shadow-[var(--glow-soft)]",
         fresh && "vyr-fresh",
@@ -120,7 +177,7 @@ export function ArtifactView({
       <span aria-hidden className="pointer-events-none absolute inset-0 overflow-hidden">
         <span className="vyr-card-sheen absolute inset-y-0 left-0 w-1/3 bg-gradient-to-r from-transparent via-foreground/[0.07] to-transparent" />
       </span>
-      <div className="relative flex items-center gap-3 px-4 pt-3.5 pb-3">
+      <div data-card-head className="relative flex items-center gap-3 px-4 pt-3.5 pb-3">
         <span className="vyr-pop grid size-8 shrink-0 place-items-center rounded-[0.65rem] border border-primary/20 bg-primary/10 text-primary" style={stagger(0)}>
           <Icon className="size-4" strokeWidth={1.6} />
         </span>
@@ -131,12 +188,58 @@ export function ArtifactView({
           </span>
           <span className="mt-0.5 block truncate font-display text-[14.5px] text-foreground">{artifact.title}</span>
         </button>
-        <span className="flex shrink-0 items-center gap-0.5 opacity-70 transition-opacity group-hover/card:opacity-100 focus-within:opacity-100">
+        <span data-card-chrome className="flex shrink-0 items-center gap-0.5 opacity-70 transition-opacity group-hover/card:opacity-100 focus-within:opacity-100">
           {text && (
             <CardButton label={copied ? "Copied" : "Copy"} onClick={copy}>
               {copied ? <Check className="size-3.5 text-success" strokeWidth={2} /> : <Copy className="size-3.5" strokeWidth={1.6} />}
             </CardButton>
           )}
+          {saved && <span className="mr-1 font-mono text-[10.5px] text-success">{saved}</span>}
+          {board && (
+            <span ref={menuButton} className="relative" data-card-menu data-card-chrome>
+              <CardButton label="More" onClick={() => setMenu((v) => !v)}>
+                <MoreHorizontal className="size-3.5" strokeWidth={1.6} />
+              </CardButton>
+              {menu && menuAt && createPortal(
+                <span ref={menuList} role="menu" style={{ top: menuAt.top, right: menuAt.right }} className="vyr-emerge liquid-menu fixed z-[70] flex w-52 flex-col rounded-2xl p-1.5 text-[12.5px]">
+                  {onAsk && (
+                    <MenuItem onClick={() => { setMenu(false); onAsk(`Explain the "${artifact.title}" card in two or three sentences: what it shows and what stands out.`); }}>
+                      <Sparkles className="size-3.5" strokeWidth={1.6} /> Explain this
+                    </MenuItem>
+                  )}
+                  {artifact.kind === "series" && (
+                    <span className="flex items-center gap-1 px-2 py-1.5">
+                      <span className="mr-auto text-muted-foreground">Chart</span>
+                      {(["line", "bar", "donut"] as ChartStyle[]).map((st) => (
+                        <button key={st} type="button" onClick={() => board.onChart(st)} className={cn("rounded-full px-2 py-0.5 capitalize", chartStyle === st ? "bg-primary/15 text-primary" : "text-muted-foreground hover:text-foreground")}>
+                          {st}
+                        </button>
+                      ))}
+                    </span>
+                  )}
+                  <span className="flex items-center gap-1 px-2 py-1.5">
+                    <span className="mr-auto text-muted-foreground">Size</span>
+                    {(["s", "m", "l"] as CardSize[]).map((sz) => (
+                      <button key={sz} type="button" onClick={() => board.onSize(sz)} className={cn("rounded-full px-2 py-0.5 uppercase", board.size === sz ? "bg-primary/15 text-primary" : "text-muted-foreground hover:text-foreground")}>
+                        {sz}
+                      </button>
+                    ))}
+                  </span>
+                  <MenuItem onClick={() => { setMenu(false); board.onPin(); }}>
+                    <Pin className="size-3.5" strokeWidth={1.6} /> {board.pinned ? "Unpin" : "Pin to top"}
+                  </MenuItem>
+                  <MenuItem onClick={() => void image("copy")}>
+                    <Copy className="size-3.5" strokeWidth={1.6} /> Copy as image
+                  </MenuItem>
+                  <MenuItem onClick={() => void image("save")}>
+                    <ImageDown className="size-3.5" strokeWidth={1.6} /> Save as image
+                  </MenuItem>
+                </span>,
+                document.body,
+              )}
+            </span>
+          )}
+          {board?.pinned && <Pin aria-label="Pinned" className="mx-1 size-3 text-primary" strokeWidth={1.8} />}
           {onZoom && (
             <CardButton label={zoomed ? "Back to all items" : "Show only this"} onClick={onZoom}>
               {zoomed ? <Minimize2 className="size-3.5" strokeWidth={1.6} /> : <Maximize2 className="size-3.5" strokeWidth={1.6} />}
@@ -162,13 +265,13 @@ export function ArtifactView({
         <div className="overflow-hidden">
           <div className="border-t border-border/70 px-4 pt-4 pb-4">
             {artifact.kind === "series" && artifact.series && (
-              artifact.chart?.style === "bar" ? (
+              chartStyle === "bar" ? (
                 // Columns like the reels; long or many labels read better as horizontal bars.
                 artifact.series.length > 16 || artifact.series.some((p) => p.label.length > 12)
-                  ? <Bars data={artifact.series} unit={artifact.chart.unit} highlight={artifact.chart.highlight} />
-                  : <Columns data={artifact.series} unit={artifact.chart.unit} highlight={artifact.chart.highlight} threshold={artifact.chart.threshold} />
+                  ? <Bars data={artifact.series} unit={artifact.chart?.unit} highlight={artifact.chart?.highlight} />
+                  : <Columns data={artifact.series} unit={artifact.chart?.unit} highlight={artifact.chart?.highlight} threshold={artifact.chart?.threshold} />
               )
-              : artifact.chart?.style === "donut" ? <Donut data={artifact.series} unit={artifact.chart.unit} />
+              : chartStyle === "donut" ? <Donut data={artifact.series} unit={artifact.chart?.unit} />
               : <LineChart data={artifact.series} unit={artifact.chart?.unit} highlight={artifact.chart?.highlight} threshold={artifact.chart?.threshold} />
             )}
             {artifact.kind === "markdown" && artifact.markdown && <Markdown text={artifact.markdown} />}
@@ -186,23 +289,57 @@ export function ArtifactView({
             {artifact.kind === "rings" && artifact.rings && <Rings data={artifact.rings} />}
             {artifact.kind === "stats" && artifact.stats && <Stats data={artifact.stats} />}
             {artifact.kind === "checklist" && artifact.checklist && <Checklist data={artifact.checklist} onToggle={onCheck} />}
-            {artifact.kind === "quiz" && artifact.quiz && <Quiz data={artifact.quiz} />}
+            {artifact.kind === "quiz" && artifact.quiz && <Quiz data={artifact.quiz} onAnswer={onAsk} />}
             {artifact.kind === "scorecard" && artifact.scorecard && <Scorecard data={artifact.scorecard} />}
-            {artifact.kind === "flashcards" && artifact.flashcards && <Flashcards data={artifact.flashcards} />}
+            {artifact.kind === "flashcards" && artifact.flashcards && <Flashcards data={artifact.flashcards} onAsk={onAsk} />}
             {artifact.kind === "gauges" && artifact.gauges && <Gauges data={artifact.gauges} />}
             {artifact.kind === "folders" && artifact.folders && <Folders data={artifact.folders} />}
             {artifact.kind === "cards" && artifact.cards && <InfoCards data={artifact.cards} />}
             {artifact.kind === "weather" && artifact.weather && <Weather data={artifact.weather} />}
-            {artifact.kind === "timer" && artifact.timer && <Timer data={artifact.timer} />}
-            {artifact.kind === "board" && artifact.board && <Board data={artifact.board} />}
+            {artifact.kind === "timer" && artifact.timer && <Timer data={artifact.timer} onUpdate={onUpdate} />}
+            {artifact.kind === "board" && artifact.board && <Board data={artifact.board} onUpdate={onUpdate} />}
             {artifact.kind === "heatmap" && artifact.heatmap && <Heatmap data={artifact.heatmap} />}
             {artifact.kind === "log" && artifact.log && <LogView data={artifact.log} />}
-            {artifact.kind === "app" && artifact.app && <AppFrame html={artifact.app.html} title={artifact.title} />}
-            {artifact.kind === "picker" && artifact.picker && <Picker data={artifact.picker} spinKey={`${artifact.id}:${artifact.at ?? 0}`} />}
+            {artifact.kind === "app" && artifact.app && <AppFrame html={artifact.app.html} title={artifact.title} onSend={onAsk} />}
+            {artifact.kind === "picker" && artifact.picker && <Picker data={artifact.picker} spinKey={`${artifact.id}:${artifact.at ?? 0}`} onAsk={onAsk} />}
             {artifact.kind === "mindmap" && artifact.mindmap && <MindMap data={artifact.mindmap} />}
+            {artifact.kind === "form" && artifact.form && (
+              <Form
+                data={artifact.form}
+                title={artifact.title}
+                onSubmit={
+                  onAsk
+                    ? (values, message) => {
+                        onUpdate?.({ op: "form_sent", args: { values } });
+                        onAsk(message);
+                      }
+                    : undefined
+                }
+              />
+            )}
+            {artifact.actions && artifact.actions.length > 0 && (
+              <div data-card-chrome className="mt-4 flex flex-wrap gap-1.5">
+                {artifact.actions.map((b, i) => (
+                  <button
+                    key={b.label}
+                    type="button"
+                    disabled={!onAsk}
+                    onClick={() => onAsk?.(b.prompt)}
+                    className={cn(
+                      "rounded-full px-3.5 py-1.5 text-[12.5px] transition-[background-color,opacity,transform] duration-200 enabled:active:scale-[0.97] disabled:opacity-45 focus-visible:outline-none",
+                      i === 0
+                        ? "bg-primary font-medium text-primary-foreground enabled:hover:bg-primary/90"
+                        : "liquid-hover relative border border-border text-foreground/90 enabled:hover:text-foreground",
+                    )}
+                  >
+                    {b.label}
+                  </button>
+                ))}
+              </div>
+            )}
             {artifact.caption && <figcaption className="mt-4 font-mono text-[11px] text-muted-foreground">{artifact.caption}</figcaption>}
             {onAsk && followUps(artifact).length > 0 && (
-              <div className="mt-4 flex flex-wrap gap-1.5">
+              <div data-card-chrome className="mt-4 flex flex-wrap gap-1.5">
                 {followUps(artifact).map((f) => (
                   <button
                     key={f.label}
@@ -244,6 +381,14 @@ function followUps(a: Artifact): { label: string; prompt: string }[] {
     default:
       return [];
   }
+}
+
+function MenuItem({ onClick, children }: { onClick: () => void; children: ReactNode }) {
+  return (
+    <button type="button" role="menuitem" onClick={onClick} className="flex items-center gap-2 rounded-xl px-2 py-1.5 text-left text-foreground/90 hover:bg-foreground/[0.06] hover:text-foreground focus-visible:outline-none">
+      {children}
+    </button>
+  );
 }
 
 function CardButton({ label, onClick, children }: { label: string; onClick: () => void; children: ReactNode }) {

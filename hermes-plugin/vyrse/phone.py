@@ -19,7 +19,7 @@ from typing import Any, Dict
 
 ACTIONS = [
     "battery", "flashlight", "find", "media", "volume", "notifications", "notify",
-    "screen", "screenshot", "tap", "long_press", "type", "swipe", "key", "open_app", "open_url",
+    "screen", "screenshot", "tap", "long_press", "type", "swipe", "key", "open_app", "open_url", "send_file",
 ]
 
 SCHEMA: Dict[str, Any] = {
@@ -31,7 +31,8 @@ SCHEMA: Dict[str, Any] = {
         "the phone): screen (numbered list of what's visible; read it before acting) | tap (n from screen, or "
         "text) | long_press | type (text into the selected field; submit yes to press enter) | swipe (direction "
         "up/down/left/right) | key (back/home/recents/notifications/quick_settings/lock) | open_app (name) | "
-        "open_url (url) | screenshot (returns an image path for vision_analyze). Every action returns the new "
+        "open_url (url; also how to send a link or page to the phone) | send_file (path of a file on this PC: the phone "
+        "downloads it; 'send this to my phone') | screenshot (returns an image path for vision_analyze). Every action returns the new "
         "screen; tap rows, not their images; typing doesn't send. For app tasks load the vyrse-phone-control skill."
     ),
     "parameters": {
@@ -50,6 +51,7 @@ SCHEMA: Dict[str, Any] = {
             "key": {"type": "string", "enum": ["back", "home", "recents", "notifications", "quick_settings", "lock"]},
             "name": {"type": "string", "description": "open_app: the app's name"},
             "url": {"type": "string"},
+            "path": {"type": "string", "description": "For send_file: the full path of the file on this PC."},
             "x": {"type": "integer"},
             "y": {"type": "integer"},
         },
@@ -57,7 +59,7 @@ SCHEMA: Dict[str, Any] = {
     },
 }
 
-_ARGS = ("state", "command", "level", "limit", "n", "text", "title", "submit", "direction", "key", "name", "url", "x", "y")
+_ARGS = ("state", "command", "level", "limit", "n", "text", "title", "submit", "direction", "key", "name", "url", "x", "y", "path")
 _KEEP_SHOTS = 5
 
 

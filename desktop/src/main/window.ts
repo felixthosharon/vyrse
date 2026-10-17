@@ -33,9 +33,10 @@ export function createMainWindow(rendererUrl: string | undefined, rendererIndex:
   const allowed = new Set(['media', 'audioCapture', 'speaker-selection'])
   win.webContents.session.setPermissionRequestHandler((_wc, permission, callback, details) => {
     const mediaTypes = (details as { mediaTypes?: string[] }).mediaTypes ?? []
-    callback(allowed.has(permission) && !mediaTypes.includes('video'))
+    // display-capture: live captions hear the PC's sound (the video track is dropped at once)
+    callback(permission === 'display-capture' || (allowed.has(permission) && !mediaTypes.includes('video')))
   })
-  win.webContents.session.setPermissionCheckHandler((_wc, permission) => allowed.has(permission))
+  win.webContents.session.setPermissionCheckHandler((_wc, permission) => allowed.has(permission) || permission === 'display-capture')
 
   // The UI is a single page: never navigate away, open external links in the real browser.
   win.webContents.on('will-navigate', (event, url) => {

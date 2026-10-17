@@ -78,13 +78,14 @@ else { & $Hermes plugins enable vyrse | Out-Null; Did "enabled" }
 # 4. Voice libraries ----------------------------------------------------------------------
 Write-Host "Voice libraries ($VyrseDir\pylib)"
 $Pylib = Join-Path $VyrseDir 'pylib'
-& $Py -c "import sys; sys.path.append(r'$Pylib'); import kokoro_onnx, phonemizer, espeakng_loader" 2>$null
-if ($LASTEXITCODE -eq 0) { Ok "kokoro-onnx, phonemizer, espeakng-loader" }
+& $Py -c "import sys; sys.path.append(r'$Pylib'); import kokoro_onnx, phonemizer, espeakng_loader, pypdf" 2>$null
+if ($LASTEXITCODE -eq 0) { Ok "kokoro-onnx, phonemizer, espeakng-loader, pypdf" }
 elseif ($Check) { Todo "voice libraries missing" }
 else {
   New-Item -ItemType Directory -Force $Pylib | Out-Null
   & $Uv pip install --python $Py --target $Pylib --no-deps kokoro-onnx==0.6.1 | Out-Null
   & $Uv pip install --python $Py --target $Pylib phonemizer==3.4.0 espeakng-loader==0.2.4 | Out-Null
+  & $Uv pip install --python $Py --target $Pylib pypdf==5.4.0 | Out-Null  # reading PDFs ("break it down")
   Did "installed (numpy/onnxruntime come from the Hermes venv)"
 }
 
@@ -120,6 +121,20 @@ if (Test-Path $wake) { Ok "wake word model" }
 elseif ($Check) { Todo "wake word model missing" }
 else { Copy-Item (Join-Path $Repo 'assets\voice\wake\vyrse-generic.npz') $wake; Did "wake word model (works for most voices; teach it yours in Settings -> Voice)" }
 
+# 5a. Live-caption models for languages Whisper small barely knows ----------------------------------------
+# CTranslate2 conversions of Whisper fine-tunes (captions.py SPECIALISTS), made once in a throwaway uv env.
+Write-Host "Caption models"
+$captionModels = @(@{ dir = 'whisper-small-ml'; repo = 'sajilck/whisper-small-malayalam'; lang = 'Malayalam' })
+foreach ($cm in $captionModels) {
+  $dest = Join-Path $HermesHome "vyrse\models\$($cm.dir)"
+  if (Test-Path (Join-Path $dest 'model.bin')) { Ok "$($cm.lang) ($($cm.dir))"; continue }
+  if ($Check) { Todo "$($cm.lang) caption model missing"; continue }
+  & uvx --python 3.11 --with 'transformers==4.46.3' --with torch --with 'setuptools<70' --with 'ctranslate2==4.5.0' `
+    --from 'ctranslate2==4.5.0' ct2-transformers-converter --model $cm.repo --output_dir $dest --quantization int8 `
+    --copy_files preprocessor_config.json | Out-Null
+  if (Test-Path (Join-Path $dest 'model.bin')) { Did "$($cm.lang) ($($cm.dir))" } else { Todo "$($cm.lang) caption model: conversion failed" }
+}
+
 # 5b. VYRSE skills -------------------------------------------------------------------------
 Write-Host "VYRSE skills"
 foreach ($skill in Get-ChildItem (Join-Path $Repo 'hermes-plugin\skills') -Directory) {
@@ -128,6 +143,20 @@ foreach ($skill in Get-ChildItem (Join-Path $Repo 'hermes-plugin\skills') -Direc
   if ($same) { Ok $skill.Name }
   elseif ($Check) { Todo "$($skill.Name) not installed or outdated" }
   else { New-Item -ItemType Directory -Force $dest | Out-Null; Copy-Item "$($skill.FullName)\*" $dest -Recurse -Force; Did $skill.Name }
+}
+
+# 5c. VYRSE's personality (SOUL.md) ----------------------------------------------------------
+# The preset goes in only when SOUL.md isn't VYRSE's already (a backup is kept). Never overwrites one that is:
+# the user's own setup answers live at its end, between the vyrse:profile markers.
+Write-Host "VYRSE personality"
+$soul = Join-Path $HermesHome 'SOUL.md'
+$isVyrse = (Test-Path $soul) -and ((Get-Content $soul -Raw -ErrorAction SilentlyContinue) -match 'You are VYRSE')
+if ($isVyrse) { Ok "SOUL.md" }
+elseif ($Check) { Todo "SOUL.md is not VYRSE's preset yet" }
+else {
+  if (Test-Path $soul) { Copy-Item $soul "$soul.before-vyrse.bak" -Force }
+  Copy-Item (Join-Path $Repo 'assets\templates\SOUL.md') $soul -Force
+  Did "SOUL.md (VYRSE's preset personality; your setup answers get added to it)"
 }
 
 # 6. Hermes config ------------------------------------------------------------------------
@@ -177,6 +206,24 @@ foreach ($s in $settings) {
   if ($Check) { Todo "$key should be $value (now: $(if ($unset) { 'unset' } else { $current -replace "`n", ' ' }))"; continue }
   & $Hermes config set $key $value --force | Out-Null
   Did "$key = $value"
+}
+
+# Every VYRSE tool must load up front ("eager"): with tool search on, anything else hides behind a search step
+# that local models almost never take, so a new VYRSE tool would silently never be used. Merged into whatever
+# the user has there; nothing is removed.
+$VyrseEager = @('vyrse_ui', 'vyrse_desktop', 'vyrse_screen', 'vyrse_reminders', 'vyrse_skills', 'vyrse_workspace',
+  'vyrse_system', 'vyrse_controls', 'vyrse_briefing', 'vyrse_alexa', 'vyrse_files', 'vyrse_phone', 'vyrse_quiz',
+  'vyrse_log', 'vyrse_analyse', 'vyrse_notes', 'vyrse_routine', 'vyrse_focus', 'vyrse_style', 'vyrse_profile',
+  'vyrse_point', 'vyrse_captions', 'vyrse_digest', 'vyrse_chrome')
+$current = ((& $Hermes config get tools.tool_search.eager 2>$null) -join "`n")
+$have = @([regex]::Matches($current, '[A-Za-z0-9_\-]+') | ForEach-Object { $_.Value } | Where-Object { $_ -match '_' -or $_ -match '^[a-z]+$' } | Where-Object { $_ -notmatch '^(not|set|unknown|None|null)$' })
+$missing = @($VyrseEager | Where-Object { $have -notcontains $_ })
+if (-not $missing.Count) { Ok "tools.tool_search.eager (all VYRSE tools)" }
+elseif ($Check) { Todo "VYRSE tools not loaded up front: $($missing -join ', ')" }
+else {
+  $all = @($have + $missing | Select-Object -Unique)
+  & $Hermes config set tools.tool_search.eager ('[' + (($all | ForEach-Object { '"' + $_ + '"' }) -join ',') + ']') --force | Out-Null
+  Did "tools.tool_search.eager += $($missing -join ', ')"
 }
 
 Write-Host ''

@@ -32,21 +32,22 @@ PROMPT = (
     "find it, flashlight, battery, media, notifications; and full control: screen, tap, type, swipe, open apps; "
     "read the screen before acting; summarise notifications briefly), `vyrse_ui` "
     "(VYRSE itself: theme, panels, conversations, mode, model, voice on/off).\n"
-    "- Current facts, news, prices, weather: `web_search` (+ `web_extract`). Browser tools only to interact "
-    "with a site; if it needs an account, ask the user to sign in once in that window. Private mode blocks "
-    "online tools.\n"
-    "- Before a multi-step task, load a matching installed skill (skill_view); `vyrse_skills` can find and "
-    "install more from the Skills Hub after the user confirms.\n"
+    "- Facts, news, prices: `web_search` (+ `web_extract`). Websites: `vyrse_chrome` (their own Chrome, "
+    "logged in): read, then click/type. Private mode blocks online tools.\n"
+    "- On-screen tasks (highlight, how do I…, do it for me): one `vyrse_point` call, action=guide or do + goal. "
+    "Never list steps from memory.\n"
+    "- Before a multi-step task, load a matching skill (skill_view); `vyrse_skills` finds more on the Skills Hub "
+    "(user confirms).\n"
     "- The workspace (`vyrse_workspace`) is your canvas beside the chat. When you analyse, compare, track, "
     "plan, monitor, report or teach, show it there in the picture that fits: charts, rings, gauges, stats, "
     "cards, mind maps, checklists, boards, timers, wheels, flashcards, or a small HTML app you write (tables "
     "only for text side by side); several items make a dashboard. Skip it for small "
-    "talk and one-line answers. No ASCII charts. Logging ('log …', 'track …'): `vyrse_log`.\n"
+    "talk. No ASCII charts. Logging ('log …', 'track …'): `vyrse_log`.\n"
     "- With something on screen, reply with just the headline in a sentence or two: the finding, total or "
     "verdict, the key fact in bold unless the talk style says no bold (\"Here you go. **Saturday** ran the "
     "hottest, at **78°C**.\"). Never re-list what the card shows.\n"
-    "- Quizzes ('quiz me'): `vyrse_quiz` (start; action=answer only when a reply answers the question).\n"
-    "- Dropped files arrive as @file: references; read them with the file tools.\n"
+    "- Quizzes: `vyrse_quiz` with options to tap. Give cards buttons for next steps; ask for details with kind=form.\n"
+    "- Dropped files arrive as @file: references.\n"
     "- Your voice: VYRSE reads replies aloud (local Kokoro voice). The user talks to you by saying your name "
     "(VYRSE, said \"vyse\") or the mic button. Never say you can't speak. Write replies that sound natural "
     "aloud. In most talk styles only the first two or three sentences are spoken, so open a long answer with "
@@ -180,6 +181,12 @@ def register(ctx) -> None:
     from . import usage
 
     usage.start()
+    from .files import index as file_index
+
+    file_index.start()
+    from . import clipboard_memory
+
+    clipboard_memory.start()
     from . import briefing
 
     ctx.register_hook("pre_llm_call", briefing.pre_llm_call)
@@ -217,6 +224,28 @@ def register(ctx) -> None:
         handler=briefing.handle,
         description=BRIEFING_SCHEMA["description"],
     )
+    from . import focus, notes, profile, routines, styles
+
+    ctx.register_tool(name="vyrse_notes", toolset="vyrse_ui", schema=notes.SCHEMA, handler=notes.handle, description=notes.SCHEMA["description"])
+
+    ctx.register_tool(name="vyrse_routine", toolset="vyrse_ui", schema=routines.SCHEMA, handler=routines.handle, description=routines.SCHEMA["description"])
+    ctx.register_tool(name="vyrse_focus", toolset="vyrse_ui", schema=focus.SCHEMA, handler=focus.handle, description=focus.SCHEMA["description"])
+
+    ctx.register_tool(
+        name="vyrse_style",
+        toolset="vyrse_ui",
+        schema=styles.SCHEMA,
+        handler=styles.handle,
+        description=styles.SCHEMA["description"],
+    )
+
+    ctx.register_tool(
+        name="vyrse_profile",
+        toolset="vyrse_ui",
+        schema=profile.SCHEMA,
+        handler=profile.handle,
+        description=profile.SCHEMA["description"],
+    )
     ctx.register_tool(
         name="vyrse_reminders",
         toolset="vyrse_ui",
@@ -239,15 +268,43 @@ def register(ctx) -> None:
 
         logging.getLogger(__name__).warning("vyrse: Kokoro TTS unavailable: %s", exc)
 
-    # Browsing in a dedicated, persistent VYRSE Chrome profile (started on demand).
+    # The user's own Chrome through the VYRSE extension; while it's connected, Hermes' browser tools (a separate
+    # Chrome profile, started on demand by ensure_browser) are turned away in VYRSE sessions.
+    from . import chrome
     from .browser import ensure_browser
 
+    chrome.setup()
+    ctx.register_tool(name="vyrse_chrome", toolset="vyrse_ui", schema=chrome.SCHEMA, handler=chrome.handle, description=chrome.SCHEMA["description"])
+    ctx.register_hook("pre_tool_call", chrome.block_other_browser)
     ctx.register_hook("pre_tool_call", ensure_browser)
 
     # Private mode: block online tools (web, browser, Skills Hub, web images).
     from . import privacy
 
     ctx.register_hook("pre_tool_call", privacy.guard)
+
+    # Over the screen: "show me where", ghost hands (after the privacy guard), live captions,
+    # and "break it down" for dropped files.
+    from . import captions, digest, point
+
+    ctx.register_tool(name="vyrse_point", toolset="vyrse_ui", schema=point.SCHEMA, handler=point.handle, description=point.SCHEMA["description"])
+    ctx.register_tool(name="vyrse_captions", toolset="vyrse_ui", schema=captions.SCHEMA, handler=captions.handle, description=captions.SCHEMA["description"])
+    from . import onscreen, turn
+
+    ctx.register_hook("pre_llm_call", turn.pre_llm_call)
+    ctx.register_hook("pre_llm_call", onscreen.pre_llm_call)
+    ctx.register_hook("pre_llm_call", captions.pre_llm_call)
+    ctx.register_hook("transform_llm_output", captions.transform_llm_output)
+    ctx.register_tool(name="vyrse_digest", toolset="vyrse_ui", schema=digest.SCHEMA, handler=digest.handle, description=digest.SCHEMA["description"])
+    ctx.register_hook("pre_tool_call", point.pre_tool_call)
+
+    # A turn that ends right after a VYRSE tool without any text gets the line that fits, not "send continue".
+    from . import fallback
+
+    ctx.register_hook("post_tool_call", fallback.post_tool_call)
+    ctx.register_hook("pre_llm_call", fallback.pre_llm_call)
+    ctx.register_hook("transform_llm_output", fallback.transform_llm_output)
+    ctx.register_hook("post_llm_call", point.post_llm_call)
 
     # .gguf files pasted into the VYRSE models folder appear in Hermes' model list.
     from . import models_watch

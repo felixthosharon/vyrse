@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { ArrowRight, Mic } from "lucide-react";
+import { ArrowRight, Mic, Sparkles } from "lucide-react";
 import { useVyrse } from "@/lib/vyrse/store";
 
 /** Opens Settings on a given page (SettingsPanel listens). */
@@ -8,13 +8,24 @@ export function openSettingsPage(page: string) {
 }
 
 /**
- * First run: VYRSE asks what to call you, then offers to learn how you say its name.
+ * The "get to know you" setup: a fresh conversation where VYRSE interviews the user (the vyrse-setup skill)
+ * and saves their answers into its personality. Used by onboarding and by Settings ("redo my setup").
+ */
+export function startPersonalSetup(v: { startNew: () => void; send: (text: string) => void; setSettingsOpen: (open: boolean) => void }) {
+  v.setSettingsOpen(false);
+  v.startNew();
+  // let the new conversation become the active one before the first message goes out
+  window.setTimeout(() => v.send("Let's do my personal setup."), 350);
+}
+
+/**
+ * First run: VYRSE asks what to call you, offers to learn how you say its name, then offers the personal setup.
  * Shown once, when Hermes has no name saved yet.
  */
 export function Onboarding() {
-  const { prefsLoaded, settings, setSettings, setSettingsOpen } = useVyrse();
+  const { prefsLoaded, settings, setSettings, setSettingsOpen, startNew, send } = useVyrse();
   const [name, setName] = useState("");
-  const [step, setStep] = useState<"name" | "voice" | "done">("name");
+  const [step, setStep] = useState<"name" | "voice" | "setup" | "done">("name");
   if (!prefsLoaded || step === "done" || (settings.userName && step === "name")) return null;
 
   const saveName = () => {
@@ -53,7 +64,7 @@ export function Onboarding() {
               </button>
             </form>
           </>
-        ) : (
+        ) : step === "voice" ? (
           <>
             <p className="eyebrow">your voice</p>
             <h2 className="mt-2 font-display text-[20px] text-foreground">Nice to meet you, {settings.userName}.</h2>
@@ -65,13 +76,37 @@ export function Onboarding() {
               <button
                 type="button"
                 onClick={() => {
-                  setStep("done");
+                  setStep("setup");
                   setSettingsOpen(true);
                   window.setTimeout(() => openSettingsPage("voice"), 50);
                 }}
                 className="liquid relative flex items-center gap-2 rounded-full px-4 py-2.5 text-[13px] text-primary"
               >
                 <Mic className="size-4" strokeWidth={1.7} /> Teach it my voice
+              </button>
+              <button type="button" onClick={() => setStep("setup")} className="liquid-hover relative rounded-full px-4 py-2.5 text-[13px] text-muted-foreground hover:text-foreground">
+                Later
+              </button>
+            </div>
+          </>
+        ) : (
+          <>
+            <p className="eyebrow">make it yours</p>
+            <h2 className="mt-2 font-display text-[20px] text-foreground">Let me get to know you.</h2>
+            <p className="mt-1.5 text-[13px] leading-relaxed text-muted-foreground">
+              A quick chat, about two minutes: what you do, what you'll use me for, how you like your answers. I'll
+              remember it and set myself up around you. Skip anything you like.
+            </p>
+            <div className="mt-5 flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setStep("done");
+                  startPersonalSetup({ startNew, send, setSettingsOpen });
+                }}
+                className="liquid relative flex items-center gap-2 rounded-full px-4 py-2.5 text-[13px] text-primary"
+              >
+                <Sparkles className="size-4" strokeWidth={1.7} /> Let's do it
               </button>
               <button type="button" onClick={() => setStep("done")} className="liquid-hover relative rounded-full px-4 py-2.5 text-[13px] text-muted-foreground hover:text-foreground">
                 Later

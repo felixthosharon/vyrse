@@ -1,3 +1,6 @@
+import { LiveCaptions } from "@/lib/voice/live-captions";
+import type { OverlayMessage } from "@/services/hermes/bridge";
+import { applyUpdate, type WorkspaceUpdate } from "@/services/hermes/workspace-interact";
 import {
   createContext,
   useCallback,
@@ -98,6 +101,14 @@ interface VyrseContextValue {
   restartWakeWord: () => Promise<void>;
   /** brief on-screen message */
   toast: string | null;
+  /** a lecture/meeting being recorded right now (started by "record this lecture") */
+  recording: { title: string; startedAt: number } | null;
+  /** live captions of the PC's audio are running */
+  captionsOn: boolean;
+  startCaptions: (to: string) => void;
+  stopCaptions: () => void;
+  startRecording: (title?: string) => void;
+  stopRecording: () => void;
   /** an alarm ringing right now (rings until stopped or snoozed) */
   alarm: { name: string; text: string } | null;
   stopAlarm: () => void;
@@ -128,6 +139,8 @@ interface VyrseContextValue {
   workspaceUnseen: string[];
   removeWorkspaceItem: (id: string) => void;
   checkWorkspaceItem: (id: string, index: number, done: boolean) => void;
+  /** the user changed an item: the screen updates at once, the plugin saves it */
+  updateWorkspaceItem: (id: string, update: WorkspaceUpdate) => void;
   /** the item shown on its own, if any */
   workspaceFocus: string | null;
   focusWorkspaceItem: (id: string | null) => void;
@@ -624,6 +637,101 @@ export function VyrseProvider({ children }: { children: ReactNode }) {
   // Reminders and routines: show and speak each result as Hermes' scheduler fires it.
   const [reminderLabel, setReminderLabel] = useState<string | null>(null);
   const [alarm, setAlarm] = useState<{ name: string; text: string } | null>(null);
+
+  // --- over-the-screen extras: live captions ------------------------------------------------
+  const captionsRef = useRef<LiveCaptions | null>(null);
+  const [captionsOn, setCaptionsOn] = useState(false);
+  // what VYRSE is doing in another app right now (ghost hands): shown in the status pill
+  const [ghostLabel, setGhostLabel] = useState<string | null>(null);
+  const overlay = useCallback((message: OverlayMessage) => getDesktopBridge()?.desktop?.overlay?.(message), []);
+  const startCaptions = useCallback(
+    (to: string) => {
+      const ui = api.ui;
+      if (!ui?.captionsChunk || !getDesktopBridge()?.desktop?.overlay) {
+        dispatch({ type: "toast/set", toast: "Live captions work in the VYRSE desktop app." });
+        return;
+      }
+      // already showing captions in that language (VYRSE and the model can both ask): leave them running
+      if (captionsRef.current?.running && captionsRef.current.language === to) return;
+      captionsRef.current?.stop();
+      const live = new LiveCaptions(
+        (pcm, lang, session) => ui.captionsChunk(pcm, lang, session),
+        (line) => overlay({ kind: "captions", op: "show", caption: line.text, ...(line.original ? { original: line.original } : {}), ...(line.lang ? { lang: line.lang } : {}) }),
+      );
+      captionsRef.current = live;
+      setCaptionsOn(true);
+      void ui.captionsWarm().catch(() => {});
+      live.start(to).catch((err: unknown) => {
+        if (captionsRef.current !== live) return; // an older start that was replaced
+        captionsRef.current = null;
+        setCaptionsOn(false);
+        overlay({ kind: "captions", op: "end" });
+        dispatch({ type: "toast/set", toast: `Couldn't start captions: ${err instanceof Error ? err.message : String(err)}` });
+      });
+    },
+    [api, overlay],
+  );
+  const stopCaptions = useCallback(() => {
+    captionsRef.current?.stop();
+    captionsRef.current = null;
+    setCaptionsOn(false);
+    overlay({ kind: "captions", op: "end" });
+  }, [overlay]);
+  // A click inside a "show me where" ring: the plugin moves a walkthrough on to its next step.
+  useEffect(() => getDesktopBridge()?.desktop?.onOverlayClicked?.(() => {
+    void api.ui?.pointClicked?.().catch(() => {});
+  }), [api]);
+  // Esc while VYRSE drives an app: stop it.
+  useEffect(() => getDesktopBridge()?.desktop?.onOverlayStop?.(() => {
+    void api.ui?.pointStop?.().catch(() => {});
+    cancelRef.current();
+    dispatch({ type: "toast/set", toast: "Stopped. I've let go of the controls." });
+  }), [api]);
+  // A photo the phone just took: on the board at once, then VYRSE works out what it is and what to do with it.
+  useEffect(() => getDesktopBridge()?.desktop?.onSnap?.((photo) => {
+    playUiSound("arrive");
+    dispatch({ type: "workspace/show", artifact: { id: `snap-${Date.now()}`, kind: "image", title: `From ${photo.from || "your phone"}`, image: { dataUrl: photo.dataUrl, alt: "Photo from the phone" } } });
+    sendRef.current(`I just snapped this with my phone: "${photo.path}". Look at it and help me with it.`);
+  }), []);
+
+  // --- lecture / meeting recording ("record this lecture"): the mic, as compressed audio, until Stop ---------------
+  const [recording, setRecording] = useState<{ title: string; startedAt: number } | null>(null);
+  const recorder = useRef<{ rec: MediaRecorder; stream: MediaStream; chunks: Blob[]; title: string } | null>(null);
+  const startRecording = useCallback((title = "") => {
+    if (recorder.current) return;
+    void navigator.mediaDevices
+      .getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } })
+      .then((stream) => {
+        const type = ["audio/webm;codecs=opus", "audio/ogg;codecs=opus", "audio/webm"].find((t) => MediaRecorder.isTypeSupported(t)) ?? "";
+        const rec = new MediaRecorder(stream, { ...(type ? { mimeType: type } : {}), audioBitsPerSecond: 48000 });
+        const chunks: Blob[] = [];
+        rec.ondataavailable = (e) => e.data.size && chunks.push(e.data);
+        rec.start(10_000); // a chunk every 10 s, so a crash loses little
+        recorder.current = { rec, stream, chunks, title: title || "Recording" };
+        setRecording({ title: title || "Recording", startedAt: Date.now() });
+      })
+      .catch((err: unknown) => dispatch({ type: "toast/set", toast: `Couldn't start recording: ${String(err)}` }));
+  }, []);
+  const stopRecording = useCallback(() => {
+    const r = recorder.current;
+    if (!r) return;
+    recorder.current = null;
+    setRecording(null);
+    r.rec.onstop = () => {
+      r.stream.getTracks().forEach((t) => t.stop());
+      const blob = new Blob(r.chunks, { type: r.rec.mimeType || "audio/webm" });
+      if (!blob.size) return;
+      dispatch({ type: "toast/set", toast: "Saving the recording…" });
+      void api.ui
+        ?.uploadRecording(blob, r.title)
+        .then((res) => {
+          if (!res.ok || !res.path) throw new Error(res.error || "upload failed");
+          sendRef.current(`I just recorded "${r.title}". Turn it into my notes: summary, flashcards and a quiz (vyrse_notes transcribe "${res.path}").`);
+        })
+        .catch((err: unknown) => dispatch({ type: "toast/set", toast: `Couldn't save the recording: ${String(err)}` }));
+    };
+    r.rec.stop();
+  }, [api]);
   const snoozeTimer = useRef<number | null>(null);
   const ringAlarm = useCallback((next: { name: string; text: string }) => {
     if (snoozeTimer.current !== null) window.clearTimeout(snoozeTimer.current);
@@ -731,7 +839,7 @@ export function VyrseProvider({ children }: { children: ReactNode }) {
     const busy = ["listening", "thinking", "working", "speaking"].includes(state.presence);
     const presence = busy ? state.presence : "thinking";
     const label =
-      presence === "speaking" || presence === "listening" ? undefined : runningTool ? pillCaption(runningTool) : undefined;
+      presence === "speaking" || presence === "listening" ? undefined : ghostLabel ?? (runningTool ? pillCaption(runningTool) : undefined);
     desktop.presence({ active: busy || turnActive, presence: label ? "working" : presence, ...(label ? { label } : {}) });
   }, [state.presence, turnActive, reminderLabel, runningTool, dictation]);
 
@@ -1028,6 +1136,7 @@ export function VyrseProvider({ children }: { children: ReactNode }) {
           }, delayMs);
         };
         scheduleProgress(7000);
+        let replied = false;
         try {
           // Talking should feel immediate; typing can afford Hermes' full reasoning.
           const reasoning = options.voice ? stateRef.current.settings.voiceReasoning : stateRef.current.agent?.reasoning;
@@ -1043,7 +1152,14 @@ export function VyrseProvider({ children }: { children: ReactNode }) {
               finishVoice(false);
               return;
             }
-            if (event.type === "text") speaker?.push(event.delta);
+            if (event.type === "text") {
+              // a light chime as VYRSE starts answering (once per reply)
+              if (!replied && event.delta.trim()) {
+                replied = true;
+                playUiSound("reply");
+              }
+              speaker?.push(event.delta);
+            }
             if (event.type === "tool" && event.phase !== "end") lastTool = event.name;
             // A new skill saved or installed: the reels' "learned" shimmer.
             if (event.type === "tool" && event.phase === "end" && !/error|fail|not (?:installed|saved)|cancel/i.test(event.summary ?? "") &&
@@ -1307,6 +1423,18 @@ export function VyrseProvider({ children }: { children: ReactNode }) {
         case "notify":
           dispatch({ type: "toast/set", toast: command.text });
           break;
+        case "overlay":
+          overlay(command.message);
+          if (command.message.kind === "ghost") setGhostLabel(command.message.op === "end" ? null : (command.message.caption ?? null));
+          break;
+        case "captions":
+          if (command.op === "start") startCaptions(command.to);
+          else stopCaptions();
+          break;
+        case "record":
+          if (command.op === "start") startRecording(command.title);
+          else stopRecording();
+          break;
         case "alert": {
           // Said aloud right away (it's what they asked to be told), unless VYRSE is mid-reply.
           playUiSound("alert");
@@ -1449,6 +1577,12 @@ export function VyrseProvider({ children }: { children: ReactNode }) {
       await v.enable();
     }, []),
     toast: state.toast,
+    recording,
+    startRecording,
+    stopRecording,
+    captionsOn,
+    startCaptions,
+    stopCaptions,
     alarm,
     stopAlarm: stopRinging,
     snoozeAlarm,
@@ -1474,6 +1608,17 @@ export function VyrseProvider({ children }: { children: ReactNode }) {
         if (done) playUiSound("tick");
         const conversationId = stateRef.current.activeId;
         if (conversationId) void api.ui?.checkWorkspaceItem(conversationId, id, index, done).catch((err) => console.warn("[vyrse] checklist save failed:", err));
+      },
+      [api],
+    ),
+    updateWorkspaceItem: useCallback(
+      (id: string, update: WorkspaceUpdate) => {
+        const item = stateRef.current.workspace.find((a) => a.id === id);
+        const next = item && applyUpdate(item, update);
+        if (!next) return;
+        dispatch({ type: "workspace/show", artifact: next });
+        const conversationId = stateRef.current.activeId;
+        if (conversationId) void api.ui?.updateWorkspaceItem(conversationId, id, update).catch((err) => console.warn("[vyrse] workspace update failed:", err));
       },
       [api],
     ),

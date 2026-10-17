@@ -34,6 +34,13 @@ def ensure_browser(tool_name: str = "", **_: Any) -> None:
     """pre_tool_call: make sure the VYRSE Chrome is up before a browser tool runs. Never blocks the tool."""
     if not str(tool_name).startswith("browser_"):
         return None
+    try:
+        from .chrome import connected
+
+        if connected():
+            return None  # the user's own Chrome is in use (chrome.block_other_browser)
+    except Exception:
+        pass
     port = _configured_port()
     if port is None:
         return None

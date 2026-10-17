@@ -70,6 +70,18 @@ def handle(params: Dict[str, Any], **_: Any) -> str:
                                                 confirmed=params.get("confirmed") is True), ensure_ascii=False)
         except Exception as exc:
             return json.dumps({"ok": False, "error": f"Couldn't sort that folder: {exc}"})
+    # Names in the common folders: VYRSE's own index answers instantly; content search, other places, or nothing
+    # found there still go to Windows Search.
+    if params.get("action") == "find" and not params.get("content"):
+        from . import index
+
+        try:
+            if index.ready():
+                hit = index.find(params.get("query") or "", params.get("kind"), params.get("modified"), params.get("in"), params.get("limit") or 15)
+                if hit.get("ok") and hit.get("count"):
+                    return json.dumps(hit, ensure_ascii=False)
+        except Exception:
+            pass
     keys = ("action", "query", "kind", "modified", "in", "content", "limit", "path")
     request = {k: params[k] for k in keys if params.get(k) not in (None, "")}
     try:

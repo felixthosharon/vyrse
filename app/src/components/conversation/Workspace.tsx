@@ -1,7 +1,9 @@
+import { END, useCardDrag } from "./use-card-drag";
 import {
   AppWindow,
   CircleDot,
   Gauge,
+  GripVertical,
   GraduationCap,
   LineChart,
   ListChecks,
@@ -12,11 +14,12 @@ import {
   SquareKanban,
   Trash2,
 } from "lucide-react";
-import { type ReactNode, useEffect, useState } from "react";
+import { type ReactNode, useEffect, useRef, useState } from "react";
 import { useVyrse } from "@/lib/vyrse/store";
 import type { Artifact } from "@/lib/vyrse/types";
 import { cn } from "@/lib/utils";
 import { ArtifactView, isWideArtifact } from "./ArtifactView";
+import { arrange, moved, useBoardLayout } from "./board-layout";
 import { Markdown } from "./Markdown";
 
 const STARTERS = [
@@ -79,31 +82,58 @@ export function Workspace() {
     workspace,
     removeWorkspaceItem,
     checkWorkspaceItem,
+    updateWorkspaceItem,
     clearWorkspace,
     workspaceFocus: zoom,
     focusWorkspaceItem: setZoom,
     send,
     busy,
+    activeId,
   } = useVyrse();
+  const { layout, update } = useBoardLayout(activeId);
+  const scroller = useRef<HTMLDivElement>(null);
   const [now, setNow] = useState(() => Date.now());
   const messages = active?.messages ?? [];
   const lastVyrse = [...messages].reverse().find((m) => m.role === "vyrse");
   const focus = presentation === "focus";
   const zoomed = zoom ? workspace.find((a) => a.id === zoom) : undefined;
-  const shown = zoomed ? [zoomed] : workspace;
+  const arranged = arrange(workspace, layout);
+  const shown = zoomed ? [zoomed] : arranged;
+  // Clearing keeps pinned cards.
+  const clear = () => {
+    const keep = new Set(layout.pinned);
+    if (!keep.size) return clearWorkspace();
+    workspace.forEach((a) => a.id && !keep.has(a.id) && removeWorkspaceItem(a.id));
+  };
 
   // "Fresh" glow for items that just arrived; re-evaluated when something new comes in.
   useEffect(() => setNow(Date.now()), [workspace]);
 
   const ask = busy ? undefined : (text: string) => send(text);
+  const drag = useCardDrag(!zoomed && shown.length > 1, scroller, (id, before) =>
+    update((l) => {
+      const ids = arrange(workspace, l).map((a) => a.id ?? "");
+      return { ...l, order: moved(ids.filter((x) => !l.pinned.includes(x)), id, before) };
+    }),
+  );
   const spanning = new Set(
-    runs(shown, !!zoomed)
+    runs(shown, !!zoomed, layout.size)
       .filter((run) => run.length === 1)
       .map((run) => run[0]!.id ?? ""),
   );
 
   return (
     <div className="flex min-h-0 flex-col">
+      {drag.chip && (
+        <div
+          aria-hidden
+          className="liquid-menu pointer-events-none fixed z-[80] flex max-w-[16rem] items-center gap-2 rounded-full py-1.5 pr-3.5 pl-2.5 text-[12.5px] text-foreground shadow-[0_12px_32px_-10px] shadow-black/60"
+          style={{ left: drag.chip.x + 14, top: drag.chip.y + 10 }}
+        >
+          <GripVertical className="size-3.5 shrink-0 text-primary" strokeWidth={1.8} />
+          <span className="truncate">{drag.chip.title}</span>
+        </div>
+      )}
       <div className="mb-2.5 flex shrink-0 items-center justify-between gap-3 px-1">
         <p className="flex items-baseline gap-2">
           <span className="font-display text-[15px] font-medium tracking-tight text-foreground">
@@ -118,8 +148,8 @@ export function Workspace() {
         <div className="flex items-center gap-1">
           {workspace.length > 0 && (
             <HeaderButton
-              onClick={clearWorkspace}
-              label="Clear workspace"
+              onClick={clear}
+              label={layout.pinned.length ? "Clear (keeps pinned cards)" : "Clear workspace"}
               icon={<Trash2 className="size-3" strokeWidth={1.6} />}
             >
               Clear
@@ -158,7 +188,7 @@ export function Workspace() {
           <span className="vyr-blob -right-16 bottom-0 size-80 bg-accent/[0.09] [animation-delay:-9s] [animation-duration:32s]" />
           <span className="vyr-blob top-1/3 left-1/3 size-56 bg-trace/[0.1] [animation-delay:-17s] [animation-duration:38s]" />
         </div>
-        <div className="field-scroll @container relative h-full overflow-y-auto rounded-[1.5rem] border border-border bg-surface/60 p-3 sm:p-4">
+        <div ref={scroller} className="field-scroll @container relative h-full overflow-y-auto rounded-[1.5rem] border border-border bg-surface/60 p-3 sm:p-4">
           {workspace.length > 0 ? (
             // One flat list with stable keys: an arriving card never rebuilds the others (that replayed their
             // entrance and re-spun wheels). Compact cards flow into two columns when the panel is wide; wide
@@ -167,7 +197,16 @@ export function Workspace() {
               {shown.map((artifact) => (
                 <div
                   key={artifact.id}
-                  className={cn(spanning.has(artifact.id ?? "") && "[column-span:all]")}
+                  {...drag.handlers(artifact.id ?? "", artifact.title)}
+                  className={cn(
+                    "transition-opacity duration-200",
+                    spanning.has(artifact.id ?? "") && "[column-span:all]",
+                    "relative",
+                    drag.dragging === artifact.id && "scale-[0.985] opacity-40",
+                    drag.over === END && artifact.id === shown[shown.length - 1]?.id && "after:pointer-events-none after:absolute after:inset-x-2 after:bottom-0.5 after:z-10 after:h-[3px] after:rounded-full after:bg-primary after:shadow-[0_0_14px_2px] after:shadow-primary/60",
+                    drag.over === artifact.id && "before:pointer-events-none before:absolute before:inset-x-2 before:-top-1.5 before:z-10 before:h-[3px] before:rounded-full before:bg-primary before:shadow-[0_0_14px_2px] before:shadow-primary/60",
+                    !zoomed && shown.length > 1 && "[&_[data-card-head]]:cursor-grab",
+                  )}
                 >
                   <ArtifactView
                     artifact={artifact}
@@ -183,6 +222,19 @@ export function Workspace() {
                       artifact.id && checkWorkspaceItem(artifact.id, index, done)
                     }
                     onAsk={ask}
+                    onUpdate={(u) => artifact.id && updateWorkspaceItem(artifact.id, u)}
+                    board={{
+                      size: layout.size[artifact.id ?? ""] ?? "m",
+                      pinned: layout.pinned.includes(artifact.id ?? ""),
+                      chart: layout.chart[artifact.id ?? ""],
+                      onSize: (sz) => update((l) => ({ ...l, size: { ...l.size, [artifact.id ?? ""]: sz } })),
+                      onPin: () =>
+                        update((l) => ({
+                          ...l,
+                          pinned: l.pinned.includes(artifact.id ?? "") ? l.pinned.filter((x) => x !== artifact.id) : [...l.pinned, artifact.id ?? ""],
+                        })),
+                      onChart: (st) => update((l) => ({ ...l, chart: { ...l.chart, [artifact.id ?? ""]: st } })),
+                    }}
                   />
                 </div>
               ))}
@@ -227,12 +279,19 @@ export function Workspace() {
   );
 }
 
-/** Consecutive compact items grouped together; each wide item (or a zoomed one) on its own. */
-function runs(items: Artifact[], single: boolean): Artifact[][] {
+/**
+ * Consecutive compact items grouped together; each wide item (or a zoomed one) on its own. The user's size wins:
+ * L always spans the board, S always sits in a column.
+ */
+function runs(items: Artifact[], single: boolean, sizes: Record<string, "s" | "m" | "l"> = {}): Artifact[][] {
+  const wide = (a: Artifact) => {
+    const sz = sizes[a.id ?? ""];
+    return sz === "l" ? true : sz === "s" ? false : isWideArtifact(a);
+  };
   const out: Artifact[][] = [];
   for (const a of items) {
     const last = out.at(-1);
-    if (!single && !isWideArtifact(a) && last && !isWideArtifact(last[0]!)) last.push(a);
+    if (!single && !wide(a) && last && !wide(last[0]!)) last.push(a);
     else out.push([a]);
   }
   return out;

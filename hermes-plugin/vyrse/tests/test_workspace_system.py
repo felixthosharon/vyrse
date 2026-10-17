@@ -271,3 +271,94 @@ def test_amounts_sent_as_rings_become_a_donut():
     assert spent["series"] == [{"label": "Food", "value": 200.0}, {"label": "Games", "value": 500.0}]
     usage = build_artifact({"kind": "rings", "title": "Usage", "items": [{"label": "CPU", "value": 13, "unit": "%"}]})
     assert usage["kind"] == "rings"
+
+
+def test_quiz_card_accepts_the_shapes_local_models_send():
+    from vyrse.workspace import build_artifact
+
+    for p in ({"kind": "quiz", "items": [{"question": "What is sprawl?"}]},
+              {"kind": "quiz", "points": [{"label": "What is sprawl?", "value": 1}]},
+              {"kind": "quiz", "rows": [["What is sprawl?"]]},
+              {"kind": "quiz", "items": ["What is sprawl?"]}):
+        art = build_artifact({"title": "Quiz", **p})
+        assert art["quiz"]["questions"][0]["question"] == "What is sprawl?", p
+
+
+def test_chart_style_named_as_the_kind_becomes_a_chart():
+    from vyrse.workspace import build_artifact
+
+    points = [{"label": "Pizza", "value": 320}, {"label": "Bread", "value": 138}]
+    art = build_artifact({"kind": "donut", "title": "Spend", "points": points})
+    assert art == build_artifact({"kind": "chart", "style": "donut", "title": "Spend", "points": points})
+    assert art["chart"]["style"] == "donut"
+
+
+def test_photo_text_comes_back_row_by_row_even_when_tilted():
+    from vyrse.screen import reading_order
+
+    def line(text, x, y, w=120):
+        return {"text": text, "words": [{"text": t, "x": x + i * (w // 2), "y": y + int(0.07 * (x + i * (w // 2))), "width": w // 2 - 4, "height": 30}
+                                        for i, t in enumerate(text.split())]}
+
+    # Windows OCR's order: the item column first, then the price column (and the photo is tilted ~4 degrees)
+    lines = [line("Margherita pizza", 40, 100), line("Garlic bread", 40, 160), line("Rs 320", 380, 100), line("Rs 138", 380, 160)]
+    assert reading_order(lines).splitlines() == ["Margherita pizza   Rs 320", "Garlic bread   Rs 138"]
+
+
+def test_flashcards_accept_the_shapes_local_models_send():
+    from vyrse.workspace import build_artifact
+
+    want = [{"front": "Where?", "back": "Chloroplasts"}]
+    for p in ({"cards": "Where? :: Chloroplasts"},
+              {"items": [{"front": "Where?", "back": "Chloroplasts"}]},
+              {"items": [{"question": "Where?", "answer": "Chloroplasts"}]},
+              {"points": [{"label": "Where? :: Chloroplasts", "value": 1}]},
+              {"rows": [["Where?", "Chloroplasts"]]}):
+        assert build_artifact({"kind": "flashcards", "title": "Cards", **p})["flashcards"] == want, p
+
+
+def test_a_new_skill_is_only_installed_after_the_user_says_yes(monkeypatch):
+    """'Learns new skills, and asks first'."""
+    from vyrse import confirm, skills_hub
+
+    ran = []
+
+    class Done:
+        returncode, stdout, stderr = 0, "installed", ""
+
+    monkeypatch.setattr(skills_hub.subprocess, "run", lambda cmd, **k: ran.append(cmd) or Done())
+    monkeypatch.setattr(confirm, "ask", lambda q, choices: "Not now")
+    out = skills_hub._install("official/video-editing", "It cuts clips for you.")
+    assert out.get("declined") and ran == []
+    monkeypatch.setattr(confirm, "ask", lambda q, choices: "Install")
+    out = skills_hub._install("official/video-editing", "It cuts clips for you.")
+    assert out["success"] and ran and "install" in ran[0]
+
+
+def test_screen_time_for_a_given_day_and_rewind_at_a_time(tmp_path, monkeypatch):
+    import datetime as dt
+    import json as _json
+
+    from vyrse import system, usage
+
+    monkeypatch.setattr(usage, "_dir", lambda: tmp_path)
+    day = dt.date(2026, 10, 15)
+    at3 = dt.datetime(2026, 10, 15, 15, 0).timestamp()
+    (tmp_path / "2026-10-15.json").write_text(_json.dumps({"apps": {"Chrome": 5400, "Terminal": 1500}, "games": {},
+                                                          "timeline": [[at3 - 600, at3 + 1200, "Chrome", "SIT379 report"]]}))
+    rep = usage.report("today", day)
+    assert rep["screen_time"] == "1 h 55 min" and rep["date"] == "2026-10-15" and rep["tracked_since"] == "2026-10-15"
+    assert system._clock_param("15:00") == dt.time(15, 0) and system._clock_param("3") == dt.time(3, 0)
+    assert system._clock_param("25:00") is None and system._date_param("2026-10-15") == day
+    out = _json.loads(system.handle({"action": "rewind", "date": "2026-10-15", "at": "15:00"}))
+    assert out["timeline"][0]["what"] == "SIT379 report"
+
+
+def test_a_date_in_the_models_training_year_means_this_year(tmp_path, monkeypatch):
+    import datetime as dt
+
+    from vyrse import system, usage
+
+    monkeypatch.setattr(usage, "_dir", lambda: tmp_path)
+    (tmp_path / f"{dt.date.today().year}-01-02.json").write_text('{"apps": {}, "games": {}}')
+    assert system._date_param(f"{dt.date.today().year - 2}-01-05") == dt.date(dt.date.today().year, 1, 5)

@@ -13,6 +13,7 @@ import { attachEchoSkill } from './alexa-skill'
 import { attachQuickAsk } from './quick'
 import { attachPhoneBridge } from './phone-bridge'
 import { attachOrb } from './orb'
+import { attachOverlay } from './overlay'
 import { createMainWindow } from './window'
 
 // Test-only: feed Chromium's fake microphone from a WAV file (end-to-end voice smoke tests).
@@ -122,6 +123,7 @@ async function main(): Promise<void> {
     attachEchoSkill(mainWindow)
     attachQuickAsk(mainWindow, rendererUrl, rendererIndex)
     attachPhoneBridge(mainWindow, backend)
+    attachOverlay(mainWindow, rendererUrl, rendererIndex, backend)
   }
 
   void backend.start()

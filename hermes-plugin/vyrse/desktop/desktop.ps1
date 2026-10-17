@@ -3,7 +3,7 @@
 param([Parameter(Mandatory = $true)][string]$Request)
 $ErrorActionPreference = 'Stop'
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
-Add-Type -AssemblyName UIAutomationClient, UIAutomationTypes, System.Windows.Forms
+Add-Type -AssemblyName UIAutomationClient, UIAutomationTypes, System.Windows.Forms, WindowsBase
 Add-Type @"
 using System; using System.Runtime.InteropServices;
 public static class VyrseUser32 {
@@ -18,6 +18,9 @@ public static class VyrseUser32 {
   [DllImport("user32.dll")] public static extern bool MoveWindow(IntPtr h, int x, int y, int w, int hgt, bool repaint);
   [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr h, out RECT r);
   [DllImport("dwmapi.dll")] public static extern int DwmGetWindowAttribute(IntPtr h, int attr, out RECT r, int size);
+  [DllImport("user32.dll")] public static extern bool SetCursorPos(int x, int y);
+  [DllImport("user32.dll")] public static extern void mouse_event(uint flags, int dx, int dy, uint data, IntPtr extra);
+  [DllImport("user32.dll")] public static extern bool SetProcessDPIAware();
   [StructLayout(LayoutKind.Sequential)] public struct RECT { public int Left, Top, Right, Bottom; }
 }
 "@
@@ -142,6 +145,45 @@ switch ($req.action) {
   }
   'click' {
     $w = Find-Window $req.window
+    if ($null -ne $req.x -and $null -ne $req.y) {
+      # The control was chosen by looking at the window (see.py): press whatever is at that point, in the background
+      # through its UI Automation pattern, climbing to the nearest pressable parent (an icon inside a button).
+      [void][VyrseUser32]::SetProcessDPIAware()  # x/y are physical pixels, as locate.ps1 reports them
+      # The control is the smallest element in this window that holds the point (the window's own tree, so it
+      # works when the window is covered, and inside XAML-hosted toolbars that FromPoint can't see into).
+      $cache = New-Object System.Windows.Automation.CacheRequest
+      $cache.Add($A::BoundingRectangleProperty)
+      $active = $cache.Activate()
+      try { $all = $w.el.FindAll($Scope::Descendants, (New-Object System.Windows.Automation.PropertyCondition ($A::IsOffscreenProperty, $false))) } finally { $active.Dispose() }
+      $el = $null; $area = [double]::MaxValue
+      foreach ($cand in $all) {
+        $b = $cand.Cached.BoundingRectangle
+        if ($b.IsEmpty -or $req.x -lt $b.X -or $req.y -lt $b.Y -or $req.x -gt $b.X + $b.Width -or $req.y -gt $b.Y + $b.Height) { continue }
+        if ($b.Width * $b.Height -lt $area) { $el = $cand; $area = $b.Width * $b.Height }
+      }
+      if (-not $el) { $el = $A::FromPoint((New-Object System.Windows.Point ([double]$req.x), ([double]$req.y))) }
+      $walker = [System.Windows.Automation.TreeWalker]::ControlViewWalker
+      for ($i = 0; $el -and $i -lt 5; $i++) {
+        $p = $null
+        if ($el.TryGetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern, [ref]$p)) { $p.Invoke(); break }
+        if ($el.TryGetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern, [ref]$p)) { $p.Toggle(); break }
+        if ($el.TryGetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern, [ref]$p)) { $p.Select(); break }
+        if ($el.TryGetCurrentPattern([System.Windows.Automation.ExpandCollapsePattern]::Pattern, [ref]$p)) { $p.Expand(); break }
+        $el = $walker.GetParent($el)
+        $p = $null
+      }
+      if (-not $p) {
+        # nothing pressable through UI Automation (custom-drawn apps): a real click at that spot, if it's on a screen
+        $onScreen = @([System.Windows.Forms.Screen]::AllScreens | Where-Object { $_.Bounds.Contains([int]$req.x, [int]$req.y) }).Count -gt 0
+        if (-not $onScreen) { Fail "'$($req.name)' is off the screen, so I can't click it. Bring the window onto the screen." }
+        [void][VyrseUser32]::ShowWindow([IntPtr]$w.hwnd, 9); [void][VyrseUser32]::SetForegroundWindow([IntPtr]$w.hwnd)
+        Start-Sleep -Milliseconds 150
+        [void][VyrseUser32]::SetCursorPos([int]$req.x, [int]$req.y)
+        [VyrseUser32]::mouse_event(0x0002, 0, 0, 0, [IntPtr]::Zero); [VyrseUser32]::mouse_event(0x0004, 0, 0, 0, [IntPtr]::Zero)
+        Out-Json @{ ok = $true; window = $w.title; clicked = [string]$req.name; how = 'mouse' }
+      }
+      Out-Json @{ ok = $true; window = $w.title; clicked = $(if ($el.Current.Name) { $el.Current.Name } else { [string]$req.name }); type = $el.Current.ControlType.ProgrammaticName }
+    }
     $name = ([string]$req.name).ToLower().Trim()
     if (-not $name) { Fail 'Say which button or item to click (its visible label).' }
     # Accessible names spell out digits and symbols (Calculator: "Nine", "Multiply by", "Equals").

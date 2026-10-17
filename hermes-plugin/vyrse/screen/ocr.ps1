@@ -1,6 +1,7 @@
-# Windows' built-in OCR (Windows.Media.Ocr) on an image file; prints the recognised lines.
-# Usage: powershell -NoProfile -ExecutionPolicy Bypass -File ocr.ps1 -Path <image>
-param([Parameter(Mandatory = $true)][string]$Path)
+﻿# Windows' built-in OCR (Windows.Media.Ocr) on an image file; prints the recognised lines.
+# Usage: powershell -NoProfile -ExecutionPolicy Bypass -File ocr.ps1 -Path <image> [-Boxes]
+# -Boxes: one JSON array of lines, each {text, words: [{text, x, y, width, height}]} in image pixels.
+param([Parameter(Mandatory = $true)][string]$Path, [switch]$Boxes)
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.Runtime.WindowsRuntime
 $null = [Windows.Storage.StorageFile, Windows.Storage, ContentType = WindowsRuntime]
@@ -24,4 +25,12 @@ $engine = [Windows.Media.Ocr.OcrEngine]::TryCreateFromUserProfileLanguages()
 if ($null -eq $engine) { throw 'No Windows OCR language is installed.' }
 $result = Await ($engine.RecognizeAsync($bitmap)) ([Windows.Media.Ocr.OcrResult])
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
-$result.Lines | ForEach-Object { $_.Text }
+if ($Boxes) {
+  $lines = @($result.Lines | ForEach-Object {
+    @{ text = $_.Text; words = @($_.Words | ForEach-Object { $b = $_.BoundingRect
+      @{ text = $_.Text; x = [int]$b.X; y = [int]$b.Y; width = [int]$b.Width; height = [int]$b.Height } }) }
+  })
+  ConvertTo-Json -InputObject $lines -Compress -Depth 5
+} else {
+  $result.Lines | ForEach-Object { $_.Text }
+}

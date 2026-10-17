@@ -189,3 +189,33 @@ export async function desktopCallViaPc(target: string, op: string, args: Record<
     return { ok: false, error: "Couldn't reach the PC for that." };
   }
 }
+
+/** Snap: a photo from the phone's camera goes to the PC, where VYRSE looks at it on the big screen. */
+export async function snapToPc(file: File): Promise<{ ok: boolean; error?: string }> {
+  const p = loadPairing();
+  if (!p) return { ok: false, error: "This phone isn't paired with the PC." };
+  try {
+    const body = await shrink(file, 1800);
+    const res = await fetch(`${p.base}/phone/snap`, {
+      method: "POST",
+      headers: { "Content-Type": "image/jpeg", "X-Hermes-Session-Token": p.token },
+      body,
+    });
+    const out = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string };
+    return res.ok && out.ok ? { ok: true } : { ok: false, error: out.error ?? "The PC didn't take it." };
+  } catch {
+    return { ok: false, error: "Couldn't reach the PC. Is it on the same Wi-Fi?" };
+  }
+}
+
+/** Camera photos are huge: send at most `max` px on the long side, as JPEG. */
+async function shrink(file: File, max: number): Promise<Blob> {
+  const bitmap = await createImageBitmap(file);
+  const scale = Math.min(1, max / Math.max(bitmap.width, bitmap.height));
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.round(bitmap.width * scale);
+  canvas.height = Math.round(bitmap.height * scale);
+  canvas.getContext("2d")!.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+  bitmap.close();
+  return new Promise((resolve, reject) => canvas.toBlob((b) => (b ? resolve(b) : reject(new Error("photo"))), "image/jpeg", 0.86));
+}

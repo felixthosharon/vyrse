@@ -50,6 +50,8 @@ export interface PresenceParams {
   paused?: boolean;
   /** device pixel ratio, when the engine runs in a worker (no window there) */
   dpr?: number;
+  /** the accent colour's light for the orb: [main, second] (unset = VYRSE's cyan) */
+  tint?: [RGB, RGB];
 }
 
 export interface PresenceHandle {
@@ -93,6 +95,15 @@ interface Palette {
   wire: number;
   /** multiplier for the sphere body fill */
   body: number;
+}
+
+/** The palette with an accent's light swapped in (cached: the same tint gives the same object every frame). */
+let tintCache: { key: string; pal: Palette } | null = null;
+function tinted(theme: "dark" | "light", tint?: [RGB, RGB]): Palette {
+  if (!tint) return PALETTES[theme];
+  const key = `${theme}:${tint[0].join(",")}:${tint[1].join(",")}`;
+  if (tintCache?.key !== key) tintCache = { key, pal: { ...PALETTES[theme], primary: tint[0], vivid: tint[0], secondary: tint[1] } };
+  return tintCache.pal;
 }
 
 const PALETTES: Record<"dark" | "light", Palette> = {
@@ -626,7 +637,7 @@ export function createPresence(canvas: HTMLCanvasElement | OffscreenCanvas, init
     const t0 = meter.__presenceProfile ? performance.now() : 0;
 
     const motion = clamp01(params.motion);
-    const pal = PALETTES[params.theme];
+    const pal = tinted(params.theme, params.tint);
     const p = profileFor(params.state);
     const react = params.reactivity;
 

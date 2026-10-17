@@ -1,3 +1,5 @@
+import { FileIndexRow } from "./settings/FileIndexRow";
+import { startPersonalSetup } from "./Onboarding";
 import { BRIEFING_TIMES, type BriefingTime } from "@/lib/vyrse/types";
 import { useEffect, useRef, useState, type ComponentType } from "react";
 import {
@@ -26,7 +28,7 @@ import { VoiceSection } from "./settings/VoiceSection";
 import { searchSettings, type SettingEntry } from "./settings/search-index";
 import { useVyrse } from "@/lib/vyrse/store";
 import type { Settings } from "@/lib/vyrse/types";
-import { TALK_STYLES } from "@/lib/vyrse/talk-styles";
+import { TALK_STYLES, type TalkStyle } from "@/lib/vyrse/talk-styles";
 import { cn } from "@/lib/utils";
 import { IS_PHONE } from "@/services/phone";
 
@@ -75,7 +77,7 @@ export const settingsBack: { current: (() => boolean) | null } = { current: null
 export function SettingsPanel() {
   const {
     settingsOpen, setSettingsOpen, settings: s, setSettings, micLive, link, restartBackend,
-    agent, setModel, setReasoning, setApprovalMode, setMemoryEnabled, setMode, setTalkStyle, phoneWake,
+    agent, setModel, setReasoning, setApprovalMode, setMemoryEnabled, setMode, setTalkStyle, phoneWake, startNew, send,
   } = useVyrse();
   const set = <K extends keyof Settings>(k: K, v: Settings[K]) => setSettings({ [k]: v } as Partial<Settings>);
   const [page, setPage] = useState<PageId | null>(null);
@@ -205,7 +207,7 @@ export function SettingsPanel() {
   const onlineModels = s.mode === "private" ? [] : (agent?.models.filter((m) => !m.local) ?? []);
   const current = agent ? `${agent.provider}::${agent.model}` : "";
   const known = agent?.models.some((m) => `${m.provider}::${m.model}` === current);
-  const styleLabel = TALK_STYLES.find((t) => t.id === s.talkStyle)?.label ?? "Normal";
+  const styleLabel = TALK_STYLES.find((t) => t.id === s.talkStyle)?.label ?? s.customStyles?.find((t) => t.id === s.talkStyle)?.label ?? "Normal";
 
   const summary: Record<PageId, string> = {
     assistant: [styleLabel, agent?.model, s.mode !== "assistant" ? s.mode : null].filter(Boolean).join(" · "),
@@ -229,17 +231,39 @@ export function SettingsPanel() {
               <p className="text-[11px] text-muted-foreground">Waiting for Hermes…</p>
             ) : (
               <>
-                <Row label="Talk style" hint={TALK_STYLES.find((t) => t.id === s.talkStyle)?.hint}>
+                <Row label="Talk style" hint={TALK_STYLES.find((t) => t.id === s.talkStyle)?.hint ?? s.customStyles?.find((t) => t.id === s.talkStyle)?.hint ?? "Your own style · ask VYRSE to make another"}>
                   <Dropdown
                     value={s.talkStyle ?? "normal"}
                     onChange={setTalkStyle}
                     label="Talk style"
-                    options={TALK_STYLES.map((t) => ({ value: t.id, label: t.label, hint: t.hint }))}
+                    options={[...TALK_STYLES.map((t) => ({ value: t.id as TalkStyle, label: t.label, hint: t.hint })), ...(s.customStyles ?? []).map((t) => ({ value: t.id as TalkStyle, label: t.label, hint: t.hint || "Your style" }))]}
                   />
                 </Row>
                 <Row label="Your name" hint="what VYRSE calls you">
                   <TextField value={s.userName ?? ""} onCommit={(v) => v && setSettings({ userName: v })} label="Your name" placeholder="Your name" />
                 </Row>
+                <Row label="Get to know you" hint="a two-minute chat; VYRSE sets itself up around you">
+                  <button type="button" onClick={() => startPersonalSetup({ startNew, send, setSettingsOpen })} className="liquid relative rounded-full px-4 py-2 text-[12.5px] text-primary">
+                    Start the chat
+                  </button>
+                </Row>
+                {!IS_PHONE && <FileIndexRow />}
+                {!IS_PHONE && (
+                  <SwitchRow
+                    label="Ghost hands"
+                    hint="see where VYRSE clicks and types when it drives an app · Esc stops it"
+                    checked={s.ghostHands ?? true}
+                    onChange={(v) => set("ghostHands", v)}
+                  />
+                )}
+                {!IS_PHONE && (
+                  <SwitchRow
+                    label="Clipboard memory"
+                    hint="“paste the link I copied this morning” · on this PC only · never passwords, codes or keys"
+                    checked={s.clipboardMemory ?? true}
+                    onChange={(v) => set("clipboardMemory", v)}
+                  />
+                )}
                 <Row label="Daily briefing" hint="or just say “good morning”">
                   <Dropdown
                     value={s.briefing ?? "off"}
@@ -327,6 +351,21 @@ export function SettingsPanel() {
           <>
             <Section title="Appearance">
               <Row label="Theme"><Segmented value={s.theme} onChange={(v) => set("theme", v)} options={[{ value: "system", label: "System" }, { value: "dark", label: "Dark" }, { value: "light", label: "Light" }]} /></Row>
+              <Row label="Accent colour" hint="the app's highlight and the orb's light">
+                <span className="flex items-center gap-2">
+                  {([["cyan", "oklch(0.8 0.072 214)"], ["violet", "oklch(0.76 0.11 292)"], ["ember", "oklch(0.79 0.11 58)"], ["mint", "oklch(0.82 0.1 168)"], ["rose", "oklch(0.77 0.11 352)"]] as const).map(([id, c]) => (
+                    <button
+                      key={id}
+                      type="button"
+                      aria-label={id}
+                      title={id[0]!.toUpperCase() + id.slice(1)}
+                      onClick={() => set("accent", id)}
+                      className={cn("size-6 rounded-full ring-offset-2 ring-offset-background transition-transform hover:scale-110", (s.accent ?? "cyan") === id && "ring-2 ring-foreground/70")}
+                      style={{ background: c }}
+                    />
+                  ))}
+                </span>
+              </Row>
               <Row label="Glass" hint="liquid glass on floating controls and panels"><Segmented value={s.glass ?? "liquid"} onChange={(v) => set("glass", v)} options={[{ value: "liquid", label: "Liquid" }, { value: "subtle", label: "Subtle" }, { value: "off", label: "Off" }]} /></Row>
               <Row label="Interface density"><Segmented value={s.density} onChange={(v) => set("density", v)} options={[{ value: "comfortable", label: "Comfortable" }, { value: "compact", label: "Compact" }]} /></Row>
               <Row label="Animations"><Segmented value={s.animations} onChange={(v) => set("animations", v)} options={[{ value: "full", label: "Full" }, { value: "reduced", label: "Reduced" }, { value: "off", label: "Off" }]} /></Row>

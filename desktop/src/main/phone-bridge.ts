@@ -8,7 +8,7 @@ import { spawn } from 'node:child_process'
 import { app, ipcMain, safeStorage, type BrowserWindow } from 'electron'
 import WebSocket, { WebSocketServer } from 'ws'
 
-import { IPC_CHANNELS, type PhoneBridgeStatus } from '../shared/backend-types'
+import { IPC_CHANNELS, type PhoneBridgeStatus, type SnapPhoto } from '../shared/backend-types'
 import type { HermesBackend } from './hermes-backend'
 import { alexaOp } from './alexa'
 
@@ -46,6 +46,8 @@ let wss: WebSocketServer | null = null
 let pairing: { code: string; expires: number; tries: number } | null = null
 let listenError: string | undefined
 let notify: () => void = () => {}
+/** A photo the phone snapped for the PC ("Snap"): handed to the main window. */
+let onSnap: (photo: SnapPhoto) => void = () => {}
 
 /*
  * PC → phone commands (flashlight, notifications, ring…). The phone's link service long-polls
@@ -73,8 +75,40 @@ function linkedDevice(): Device | null {
   return best
 }
 
+/** Files offered to the phone ("send this to my phone"): one random link each, for 15 minutes, home network only. */
+const shares = new Map<string, { path: string; name: string; expires: number }>()
+const SHARE_MS = 15 * 60_000
+const SHARE_MAX = 500 * 1024 * 1024
+
+/** Offer a PC file to the phone: the phone opens a one-file download link and its browser saves it. */
+function sendFile(args: Record<string, unknown>): Promise<unknown> {
+  const file = String(args['path'] ?? '')
+  // A local drive path only (never a network share or URL), an existing file, not too big.
+  if (!/^[A-Za-z]:[\\/]/.test(file)) return Promise.resolve({ ok: false, error: 'Send a file from this PC (a full path like C:\\...).' })
+  let size = 0
+  try {
+    const st = fs.statSync(file)
+    if (!st.isFile()) return Promise.resolve({ ok: false, error: 'That’s a folder, not a file.' })
+    size = st.size
+  } catch {
+    return Promise.resolve({ ok: false, error: `No such file: ${file}` })
+  }
+  if (size > SHARE_MAX) return Promise.resolve({ ok: false, error: 'That file is over 500 MB; too big to send this way.' })
+  const host = lanAddresses()[0]
+  if (!host) return Promise.resolve({ ok: false, error: 'This PC isn’t on a home network the phone can reach.' })
+  for (const [k, v] of shares) if (v.expires < Date.now()) shares.delete(k)
+  const token = crypto.randomBytes(24).toString('base64url')
+  const name = path.basename(file)
+  shares.set(token, { path: file, name, expires: Date.now() + SHARE_MS })
+  return phoneCommand('open_url', { url: `http://${host}:${PHONE_PORT}/phone/file/${token}/${encodeURIComponent(name)}` }).then(r => {
+    const result = (r ?? {}) as { ok?: boolean; error?: string }
+    return result.ok === false ? result : { ok: true, sent: name, size_mb: Math.round((size / 1048576) * 10) / 10, note: 'The phone is downloading it.' }
+  })
+}
+
 /** Run something on the paired phone (its link service must be on). */
 export function phoneCommand(action: string, args: Record<string, unknown> = {}): Promise<unknown> {
+  if (action === 'send_file') return sendFile(args)
   const device = linkedDevice()
   if (!device)
     return Promise.resolve({
@@ -279,6 +313,19 @@ async function onRequest(backend: HermesBackend, req: http.IncomingMessage, res:
 
   if (url.pathname === '/phone/hello') return json(res, 200, { app: 'vyrse', pc: os.hostname() })
 
+  // A file the user sent to their phone: the link itself is the key (random, 15 minutes).
+  if (url.pathname.startsWith('/phone/file/') && req.method === 'GET') {
+    const share = shares.get(url.pathname.split('/')[3] ?? '')
+    if (!share || share.expires < Date.now()) return json(res, 404, { error: 'This link has expired. Ask VYRSE to send it again.' })
+    res.writeHead(200, {
+      'Content-Type': 'application/octet-stream',
+      'Content-Disposition': `attachment; filename*=UTF-8''${encodeURIComponent(share.name)}`,
+      'Content-Length': fs.statSync(share.path).size,
+    })
+    fs.createReadStream(share.path).on('error', () => res.destroy()).pipe(res)
+    return
+  }
+
   if (url.pathname === '/phone/pair' && req.method === 'POST') {
     const body = await readJson(req)
     if (!pairing || pairing.expires < Date.now()) return json(res, 403, { error: 'Pairing isn’t open. On the PC: Settings → Phone → Pair a phone.' })
@@ -312,6 +359,38 @@ async function onRequest(backend: HermesBackend, req: http.IncomingMessage, res:
   if (url.pathname === '/phone/ping') {
     const conn = backend.getConnection()
     return json(res, 200, { ok: true, hermes: Boolean(conn), hermesVersion: conn?.hermesVersion, pc: os.hostname() })
+  }
+
+  if (url.pathname === '/phone/snap' && req.method === 'POST') {
+    // A photo from the phone's camera for the PC to look at (JPEG/PNG, up to 12 MB), kept in VYRSE's own folder.
+    const type = String(req.headers['content-type'] ?? '')
+    const ext = type.includes('png') ? 'png' : type.includes('webp') ? 'webp' : 'jpg'
+    const chunks: Buffer[] = []
+    let size = 0
+    const ok = await new Promise<boolean>(resolve => {
+      req.on('data', (c: Buffer) => {
+        size += c.length
+        if (size > 12 * 1024 * 1024) {
+          req.destroy()
+          resolve(false)
+        } else chunks.push(c)
+      })
+      req.on('end', () => resolve(true))
+      req.on('error', () => resolve(false))
+    })
+    if (!ok || !size) return json(res, 413, { ok: false, error: 'That photo is too big.' })
+    const data = Buffer.concat(chunks)
+    const magic = data.subarray(0, 4).toString('hex')
+    if (!/^(ffd8ff|89504e47|52494646)/.test(magic)) return json(res, 415, { ok: false, error: 'Not a photo.' })
+    const dir = path.join(app.getPath('userData'), 'snaps')
+    fs.mkdirSync(dir, { recursive: true })
+    const file = path.join(dir, `snap-${new Date().toISOString().replace(/[:.]/g, '-')}.${ext}`)
+    fs.writeFileSync(file, data)
+    // keep the last 30
+    const old = fs.readdirSync(dir).filter(n => n.startsWith('snap-')).sort().slice(0, -30)
+    for (const n of old) fs.rmSync(path.join(dir, n), { force: true })
+    onSnap({ path: file, dataUrl: `data:image/${ext === 'jpg' ? 'jpeg' : ext};base64,${data.toString('base64')}`, from: device.name })
+    return json(res, 200, { ok: true })
   }
 
   if (url.pathname === '/phone/commands' && req.method === 'GET') {
@@ -510,6 +589,13 @@ export function attachPhoneBridge(main: BrowserWindow, backend: HermesBackend): 
   load()
   notify = () => {
     if (!main.isDestroyed()) main.webContents.send(IPC_CHANNELS.phoneStatus, phoneStatus())
+  }
+  onSnap = photo => {
+    if (main.isDestroyed()) return
+    if (main.isMinimized()) main.restore()
+    main.show()
+    main.focus()
+    main.webContents.send(IPC_CHANNELS.snap, photo)
   }
   ipcMain.handle(IPC_CHANNELS.phone, async (event, op: string, args: Record<string, unknown> = {}) => {
     if (event.sender !== main.webContents) return { error: 'not allowed' }

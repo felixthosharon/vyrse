@@ -10,7 +10,7 @@ import wave
 from pathlib import Path
 from typing import Any, Dict
 
-from fastapi import APIRouter, Body, HTTPException
+from fastapi import APIRouter, Body, HTTPException, Request
 
 router = APIRouter()
 _PLUGIN_DIR = Path(__file__).resolve().parent.parent
@@ -64,13 +64,49 @@ async def model_vision(model: str) -> Dict[str, Any]:
 
 @router.get("/state")
 async def get_state() -> Dict[str, Any]:
-    return {"prefs": _ui_state().load()}
+    styles = _load("vyrse_plugin_styles", "styles.py")
+    return {"prefs": {**_ui_state().load(), "customStyles": styles.listing()}}
 
 
 @router.patch("/state")
 async def patch_state(body: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
     prefs, errors = _ui_state().update(body.get("prefs") or {})
     return {"prefs": prefs, "errors": errors}
+
+
+@router.get("/files/index")
+async def files_index_status() -> Dict[str, Any]:
+    """The file index (Settings): items and when it last ran."""
+    return await asyncio.to_thread(_load("vyrse_plugin_files_index", "files/index.py").status)
+
+
+@router.post("/files/index")
+async def files_index_refresh() -> Dict[str, Any]:
+    """Re-index the main folders now (Settings button)."""
+    return await asyncio.to_thread(_load("vyrse_plugin_files_index", "files/index.py").refresh)
+
+
+@router.post("/captions/chunk")
+async def captions_chunk(request: Request, to: str = "en", session: str = "") -> Dict[str, Any]:
+    """Live captions: one phrase of the PC's audio (16 kHz mono int16) -> the line, translated if needed."""
+    captions = _load("vyrse_plugin_captions", "captions.py")
+    data = await request.body()
+    online = _ui_state().load().get("mode") != "private"
+    return await asyncio.to_thread(captions.chunk, data[: 16000 * 2 * 12], to, online, session[:40])
+
+
+@router.post("/captions/warm")
+async def captions_warm() -> Dict[str, Any]:
+    """Captions are starting: load the speech model now."""
+    return await asyncio.to_thread(_load("vyrse_plugin_captions", "captions.py").warm)
+
+
+@router.post("/notes/upload")
+async def notes_upload(request: Request, title: str = "", ext: str = ".webm") -> Dict[str, Any]:
+    """A recording made in VYRSE ("record this lecture"), saved for vyrse_notes to transcribe."""
+    notes = _load("vyrse_plugin_notes", "notes.py")
+    data = await request.body()
+    return await asyncio.to_thread(notes.save_upload, data, title, ext)
 
 
 @router.get("/reminders/fired")
@@ -119,6 +155,14 @@ async def workspace_check(session_id: str, body: Dict[str, Any] = Body(...)) -> 
     return {"ok": True}
 
 
+@router.post("/workspace/{session_id}/update")
+async def workspace_update(session_id: str, body: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
+    """The user changed an item on the board: timer controls, a card moved on a board, a form sent."""
+    art = await asyncio.to_thread(_workspace().store_update, session_id, str(body.get("id") or ""), str(body.get("op") or ""),
+                                  body.get("args") if isinstance(body.get("args"), dict) else {})
+    return {"ok": art is not None, "artifact": art}
+
+
 @router.post("/workspace/{session_id}/clear")
 async def workspace_clear(session_id: str) -> Dict[str, Any]:
     _stop_live(session_id, None)
@@ -134,6 +178,23 @@ async def confirm_answer(qid: str, body: Dict[str, Any] = Body(...)) -> Dict[str
         raise HTTPException(status_code=404, detail="no pending question")
     choice = body.get("choice")
     return {"ok": module.answer(qid, str(choice) if choice is not None else None)}
+
+
+@router.post("/point/clicked")
+async def point_clicked() -> Dict[str, Any]:
+    """The user clicked inside the "show me where" ring (the app's overlay saw it): a walkthrough moves on."""
+    module = sys.modules.get("hermes_plugins.vyrse.point")
+    if module is None:
+        raise HTTPException(status_code=503, detail="vyrse plugin not loaded")
+    module.ring_clicked.set()
+    return {"ok": True}
+
+
+@router.post("/point/stop")
+async def point_stop() -> Dict[str, Any]:
+    """Esc while VYRSE has the controls: stop clicking now (the app also interrupts the turn)."""
+    module = sys.modules.get("hermes_plugins.vyrse.navigator")
+    return {"ok": True, "was_running": bool(module and module.cancel())}
 
 
 @router.post("/desktop-result/{cid}")

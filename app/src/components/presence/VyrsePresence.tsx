@@ -19,6 +19,14 @@ function readBg(el: HTMLElement): [number, number, number] {
  * Thin React shell around the presence renderer.
  * The renderer itself knows nothing about React and can be swapped out.
  */
+/** The orb's light for each accent colour (cyan uses the engine's own palette). */
+const ACCENT_TINT: Partial<Record<string, { dark: [[number, number, number], [number, number, number]]; light: [[number, number, number], [number, number, number]] }>> = {
+  violet: { dark: [[176, 152, 255], [122, 112, 244]], light: [[118, 88, 230], [92, 80, 212]] },
+  ember: { dark: [[255, 176, 118], [238, 128, 96]], light: [[214, 112, 40], [196, 84, 60]] },
+  mint: { dark: [[122, 236, 192], [84, 200, 172]], light: [[0, 150, 118], [0, 122, 140]] },
+  rose: { dark: [[255, 146, 196], [222, 112, 204]], light: [[206, 60, 130], [168, 60, 170]] },
+};
+
 export function VyrsePresence({ className }: { className?: string }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const handleRef = useRef<PresenceHandle | null>(null);
@@ -122,6 +130,7 @@ export function VyrsePresence({ className }: { className?: string }) {
         p.detail = DETAIL[s.voiceVisualization];
         p.contrast = s.highContrast ? 1.25 : 1;
         p.theme = themeRef.current;
+        p.tint = ACCENT_TINT[s.accent ?? "cyan"]?.[p.theme];
         p.attention += (attentionRef.current - p.attention) * 0.06;
         // Wait for the panel to finish sliding over before pausing, so the slide shows a live orb.
         if (coveredRef.current) {

@@ -6,6 +6,7 @@ questions — CPU, memory, GPU, disks, network, top processes, usage over time �
 from __future__ import annotations
 
 import json
+from datetime import date as _date
 import logging
 import subprocess
 import threading
@@ -28,13 +29,22 @@ SCHEMA: Dict[str, Any] = {
         "GPU goes over 80 degrees' = watch gpu_temp alert_above 80 notify_phone true minutes 120); "
         "action=stop_watch (metric); action=usage (screen time: which apps and games, how long, today or period=week, "
         "and the gaming stretch going on right now: 'how long have I been gaming today?'); action=games (installed "
-        "Steam games). show=true also puts the result in "
+        "Steam games); action=rewind (a timeline of what was on screen: 'what was I doing before lunch', 'what did I have open "
+        "yesterday'; then you can reopen things with vyrse_files/vyrse_desktop); action=recap (the nightly recap: 'how was my "
+        "day', 'recap my day'); action=doctor (a PC check-up: what's slowing it or worth fixing, with fixes to offer). "
+        "show=true also puts the result in "
         "VYRSE's workspace (chart, bar chart or table), so you only need to say a sentence about it."
     ),
     "parameters": {
         "type": "object",
         "properties": {
-            "action": {"type": "string", "enum": ["overview", "processes", "disks", "storage", "sample", "watch", "stop_watch", "usage", "games"]},
+            "action": {"type": "string", "enum": ["overview", "processes", "disks", "storage", "sample", "watch", "stop_watch", "usage", "games", "rewind", "recap", "doctor"]},
+            "hours": {"type": "number", "description": "For rewind: how far back from now (default 3), or with day=yesterday the whole day."},
+            "day": {"type": "string", "enum": ["today", "yesterday"], "description": "For rewind: a whole day instead of the last hours."},
+            "date": {"type": "string", "description": f"For usage or rewind: one specific day, YYYY-MM-DD. It is {_date.today().year} now: "
+                                                      "'on October 15' -> that date this year."},
+            "at": {"type": "string", "description": "For rewind: a clock time, 24h HH:MM ('what was I doing at 3' -> 15:00; at 3 in the "
+                                                    "morning -> 03:00). Shows the hour around it, on `date` or today."},
             "period": {"type": "string", "enum": ["today", "week"], "description": "For usage. Default today."},
             "metric": {"type": "string", "enum": ["cpu", "memory", "gpu", "gpu_temp", "network"],
                        "description": "For sample/watch/stop_watch."},
@@ -329,6 +339,38 @@ def _watch(metric: str, interval: float, minutes: float, above: Optional[float] 
     return out
 
 
+def _date_param(value: Any) -> Optional["date"]:
+    import datetime as _dt
+
+    try:
+        d = _dt.date.fromisoformat(str(value).strip()[:10]) if value else None
+    except ValueError:
+        return None
+    # Models fill in the year they were trained in ("2024-10-15"). Nothing can be recorded before VYRSE started
+    # tracking, so a year like that means this year's same day (when that isn't in the future).
+    if d is not None and d.year != _dt.date.today().year:
+        from . import usage
+
+        first = usage.tracked_since()
+        try:
+            this_year = d.replace(year=_dt.date.today().year)
+        except ValueError:
+            return d
+        if (first is None or d < first) and this_year <= _dt.date.today():
+            return this_year
+    return d
+
+
+def _clock_param(value: Any) -> Optional["dtime"]:
+    import datetime as _dt
+    import re as _re
+
+    m = _re.fullmatch(r"\s*(\d{1,2})(?::(\d{2}))?\s*", str(value or ""))
+    if not m or int(m.group(1)) > 23 or int(m.group(2) or 0) > 59:
+        return None
+    return _dt.time(int(m.group(1)), int(m.group(2) or 0))
+
+
 def _show(artifact_params: Dict[str, Any]) -> Optional[str]:
     from .workspace import build_artifact, deliver
 
@@ -446,19 +488,64 @@ def handle(params: Dict[str, Any], **_: Any) -> str:
             from . import usage
 
             period = "week" if params.get("period") == "week" else "today"
-            rep = usage.report(period)
+            on = _date_param(params.get("date"))
+            rep = usage.report(period, on)
             result.update(rep)
+            if not rep["top_apps"]:
+                since = rep.get("tracked_since")
+                result["note"] = (f"Nothing recorded for that {'day' if period != 'week' or on else 'week'}. VYRSE has tracked screen time "
+                                  f"since {since} (only while it runs). Say exactly that; don't guess other reasons." if since else
+                                  "VYRSE hasn't recorded any screen time yet (it counts while it runs).")
             if show and rep["top_apps"]:
-                if period == "week":
-                    result["workspace"] = _show({"kind": "chart", "style": "bar", "id": "gaming-week", "title": "Gaming this week",
-                                                 "unit": " min", "points": [{"label": d["day"], "value": d["gaming_min"]} for d in rep["days"]],
-                                                 "caption": f"{rep['gaming']} gaming · {rep['screen_time']} screen time"})
+                label = "today" if on is None else on.strftime("%b %d").replace(" 0", " ")
+                top = rep["top_apps"][:8]
+                # a small dashboard: the totals, then the picture
+                result["workspace"] = _show({"kind": "stats", "id": "screen-time-stats", "title": f"Screen time · {'this week' if period == 'week' and on is None else label}",
+                                             "items": [{"label": "Screen time", "value": rep["screen_time"]},
+                                                       {"label": "Gaming", "value": rep["gaming"]},
+                                                       {"label": "Top app", "value": top[0]["app"], "note": top[0]["time"]}]})
+                if period == "week" and on is None:
+                    _show({"kind": "chart", "style": "bar", "id": "screen-time-week", "title": "Screen time per day",
+                           "unit": " min", "points": [{"label": d["day"], "value": d["total_min"]} for d in rep["days"]],
+                           "caption": f"{rep['screen_time']} this week · {rep['gaming']} of it gaming"})
                 else:
-                    top = rep["top_apps"][:8]
-                    result["workspace"] = _show({"kind": "chart", "style": "bar", "id": "screen-time", "title": "Screen time today",
-                                                 "unit": " min", "points": [{"label": a["app"], "value": a["minutes"]} for a in top],
-                                                 "highlight": next((a["app"] for a in top if a["game"]), ""),
-                                                 "caption": f"{rep['gaming']} gaming · {rep['screen_time']} in total"})
+                    _show({"kind": "chart", "style": "bar", "id": "screen-time", "title": f"Apps · {label}",
+                           "unit": " min", "points": [{"label": a["app"], "value": a["minutes"]} for a in top],
+                           "highlight": next((a["app"] for a in top if a["game"]), ""),
+                           "caption": f"{rep['gaming']} gaming · {rep['screen_time']} in total"})
+        elif action in ("recap", "doctor"):
+            from . import recap
+
+            rep = recap.recap() if action == "recap" else recap.doctor()
+            card = rep.pop("card")
+            result.update(rep)
+            result["workspace"] = _show(card)
+        elif action == "rewind":
+            import datetime as _dt
+
+            from . import usage
+
+            on = _date_param(params.get("date"))
+            at = _clock_param(params.get("at"))
+            if at is not None:
+                d = on or _dt.date.today()
+                moment = _dt.datetime.combine(d, at)
+                if on is None and moment > _dt.datetime.now():  # "at 3" said in the morning means yesterday's 3
+                    moment -= _dt.timedelta(days=1)
+                start = moment.timestamp() - 3600
+                end = moment.timestamp() + 3600
+            elif on is not None or params.get("day") in ("today", "yesterday"):
+                d = on or (_dt.date.today() - _dt.timedelta(days=1 if params["day"] == "yesterday" else 0))
+                start = time.mktime(d.timetuple())
+                end = start + 86400
+            else:
+                end = time.time()
+                start = end - max(0.25, min(48.0, float(params.get("hours") or 3))) * 3600
+            rows = usage.rewind(start, end)
+            result.update(timeline=rows[-60:], note="From VYRSE's on-device screen timeline (only while VYRSE runs; private mode isn't recorded).")
+            if rows:
+                result["workspace"] = _show({"kind": "timeline", "id": "rewind", "title": "Rewind",
+                                             "items": [{"at": f"{r['from']}-{r['to']}", "label": r["what"], "detail": f"{r['app']} · {r['minutes']} min"} for r in rows[-24:]]})
         elif action == "games":
             from . import usage
 

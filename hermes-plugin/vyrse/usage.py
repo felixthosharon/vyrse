@@ -34,7 +34,8 @@ _NOT_GAMES = {"steam", "steamwebhelper", "epicgameslauncher", "riotclientservice
 _FRIENDLY = {"code": "VS Code", "chrome": "Chrome", "msedge": "Edge", "firefox": "Firefox", "discord": "Discord",
              "spotify": "Spotify", "explorer": "File Explorer", "windowsterminal": "Terminal", "winword": "Word",
              "excel": "Excel", "powerpnt": "PowerPoint", "notepad": "Notepad", "vlc": "VLC", "obs64": "OBS",
-             "valorant-win64-shipping": "VALORANT", "javaw": "Minecraft", "robloxplayerbeta": "Roblox"}
+             "valorant-win64-shipping": "VALORANT", "javaw": "Minecraft", "robloxplayerbeta": "Roblox",
+             "applicationframehost": "Windows apps", "systemsettings": "Settings", "msedgewebview2": "Edge"}
 _lock = threading.Lock()
 _started = False
 # the unbroken gaming stretch in progress: (game, started_at, last_seen)
@@ -87,6 +88,23 @@ def is_game(proc: str, exe: str) -> bool:
     return proc.lower().removesuffix(".exe") not in _NOT_GAMES and bool(_GAME_DIRS.search(exe or ""))
 
 
+def _title() -> str:
+    hwnd = ctypes.windll.user32.GetForegroundWindow()
+    n = ctypes.windll.user32.GetWindowTextLengthW(hwnd)
+    buf = ctypes.create_unicode_buffer(n + 1)
+    ctypes.windll.user32.GetWindowTextW(hwnd, buf, n + 1)
+    return buf.value
+
+
+def _private() -> bool:
+    try:
+        from . import ui_state
+
+        return ui_state.load().get("mode") == "private"
+    except Exception:
+        return False
+
+
 def _foreground() -> Optional[Tuple[str, str]]:
     import psutil
 
@@ -117,9 +135,17 @@ def sample(now: Optional[float] = None) -> None:
     if name.lower() in ("lockapp", "vyrse", "electron"):
         return
     day = date.fromtimestamp(now)
+    title = "" if _private() else _clean_title(_title(), name)
     with _lock:
         data = _load(day)
         data["apps"][name] = round(data["apps"].get(name, 0) + TICK)
+        # the timeline for Rewind: consecutive samples of the same window merge into one stretch
+        tl = data.setdefault("timeline", [])
+        if tl and tl[-1][2] == name and tl[-1][3] == title and now - tl[-1][1] <= TICK * 3:
+            tl[-1][1] = round(now)
+        else:
+            tl.append([round(now - TICK), round(now), name, title])
+        del tl[:-3000]
         if game:
             data["games"][name] = round(data["games"].get(name, 0) + TICK)
             # a stretch survives short breaks (alt-tab, loading screens) of up to 10 minutes
@@ -130,6 +156,50 @@ def sample(now: Optional[float] = None) -> None:
         _save(day, data)
 
 
+def _clean_title(title: str, app: str) -> str:
+    """The useful part of a window title (the document, page or chat), without the app's own name."""
+    t = re.sub(r"\s+[-–—|]\s+(Google Chrome|Microsoft Edge|Mozilla Firefox|Visual Studio Code|Discord|Notepad|File Explorer|Brave)$", "", title.strip())
+    t = re.sub(r"^\(\d+\)\s+", "", t)  # "(3) YouTube" -> "YouTube"
+    return "" if t.lower() == app.lower() else t[:90]
+
+
+def _prune(keep_days: int = 7) -> None:
+    """The timeline is kept a week; daily totals stay (they're just numbers)."""
+    cutoff = date.today() - timedelta(days=keep_days)
+    for f in _dir().glob("*.json"):
+        try:
+            d = date.fromisoformat(f.stem)
+        except ValueError:
+            continue
+        if d < cutoff:
+            data = _load(d)
+            if data.pop("timeline", None) is not None:
+                _save(d, data)
+
+
+def rewind(start: float, end: float, min_seconds: int = 60) -> List[Dict[str, Any]]:
+    """What was in front between two times: stretches of at least `min_seconds`, short gaps merged."""
+    out: List[Dict[str, Any]] = []
+    day = date.fromtimestamp(start)
+    while day <= date.fromtimestamp(end):
+        for a, b, app, title in _load(day).get("timeline", []):
+            if b < start or a > end:
+                continue
+            a, b = max(a, start), min(b, end)
+            if out and out[-1]["app"] == app and out[-1]["title"] == title and a - out[-1]["_b"] <= 180:
+                out[-1]["_b"] = b
+            else:
+                out.append({"_a": a, "_b": b, "app": app, "title": title})
+        day += timedelta(days=1)
+    rows = []
+    for r in out:
+        secs = r["_b"] - r["_a"]
+        if secs >= min_seconds:
+            rows.append({"from": time.strftime("%H:%M", time.localtime(r["_a"])), "to": time.strftime("%H:%M", time.localtime(r["_b"])),
+                         "minutes": round(secs / 60), "app": r["app"], "what": r["title"] or r["app"]})
+    return rows
+
+
 def start() -> None:
     global _started
     if _started or os.name != "nt" or not os.environ.get("HERMES_DASHBOARD_SESSION_TOKEN"):
@@ -137,6 +207,10 @@ def start() -> None:
     _started = True
 
     def run() -> None:
+        try:
+            _prune()
+        except Exception:
+            pass
         while True:
             time.sleep(TICK)
             try:
@@ -152,9 +226,19 @@ def _hm(seconds: float) -> str:
     return f"{m // 60} h {m % 60} min" if m >= 60 else f"{m} min"
 
 
-def report(period: str = "today") -> Dict[str, Any]:
-    days = 7 if period == "week" else 1
-    today = date.today()
+def tracked_since() -> Optional[date]:
+    """The first day VYRSE recorded screen time on this PC."""
+    days = sorted(p.stem for p in _dir().glob("????-??-??.json"))
+    try:
+        return date.fromisoformat(days[0]) if days else None
+    except ValueError:
+        return None
+
+
+def report(period: str = "today", on: Optional[date] = None) -> Dict[str, Any]:
+    """Screen time for today, the last 7 days (period=week) or one given day (`on`)."""
+    days = 7 if period == "week" and on is None else 1
+    today = on or date.today()
     apps: Dict[str, float] = {}
     games: Dict[str, float] = {}
     per_day: List[Dict[str, Any]] = []
@@ -165,7 +249,7 @@ def report(period: str = "today") -> Dict[str, Any]:
             apps[k] = apps.get(k, 0) + v
         for k, v in data["games"].items():
             games[k] = games.get(k, 0) + v
-        per_day.append({"day": "Today" if i == 0 else d.strftime("%a"), "gaming_min": round(sum(data["games"].values()) / 60),
+        per_day.append({"day": "Today" if d == date.today() else d.strftime("%a"), "gaming_min": round(sum(data["games"].values()) / 60),
                         "total_min": round(sum(data["apps"].values()) / 60)})
     top = sorted(apps.items(), key=lambda kv: -kv[1])[:10]
     out: Dict[str, Any] = {
@@ -174,6 +258,10 @@ def report(period: str = "today") -> Dict[str, Any]:
         "top_apps": [{"app": k, "time": _hm(v), "minutes": round(v / 60), "game": k in games} for k, v in top],
         "note": "Counted by VYRSE since it started tracking (only while VYRSE runs; time away from the keyboard is skipped).",
     }
+    first = tracked_since()
+    out["tracked_since"] = first.isoformat() if first else None
+    if on is not None:
+        out["date"] = on.isoformat()
     if period == "week":
         out["days"] = per_day
     s = _stretch

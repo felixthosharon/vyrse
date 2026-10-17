@@ -57,7 +57,29 @@ export interface VyrseBridge {
     setQuickShortcut?(accelerator: string | null): Promise<boolean>;
     onQuickAsk?(callback: (ask: { id: string; text: string }) => void): () => void;
     quickAnswer?(update: { id: string; text: string; done: boolean; error?: boolean; activity?: string }): void;
+    /** draw over the user's screen (rings, the ghost cursor, captions) */
+    overlay?(message: OverlayMessage): void;
+    /** Esc pressed while VYRSE was driving an app */
+    onOverlayStop?(callback: () => void): () => void;
+    /** the user clicked inside a "show me where" ring */
+    onOverlayClicked?(callback: () => void): () => void;
+    /** a photo the phone snapped for the PC */
+    onSnap?(callback: (photo: { dataUrl: string; path: string; from: string }) => void): () => void;
   };
+}
+
+/** Mirrors OverlayMessage in desktop/src/shared/backend-types.ts. `rect` is in physical screen pixels. */
+export interface OverlayMessage {
+  kind: "point" | "ghost" | "captions" | "clear";
+  op?: "show" | "move" | "end";
+  rect?: { x: number; y: number; width: number; height: number };
+  label?: string;
+  caption?: string;
+  step?: string;
+  original?: string;
+  lang?: string;
+  /** point: keep the ring until the user clicks inside it */
+  hold?: boolean;
 }
 
 export interface AlexaStatus {

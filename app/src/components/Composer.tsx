@@ -1,7 +1,7 @@
-import { ArrowUp, Paperclip, Square, X } from "lucide-react";
+import { ArrowUp, Camera, Paperclip, Sparkles, Square, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useVyrse } from "@/lib/vyrse/store";
-import { IS_PHONE } from "@/services/phone";
+import { IS_PHONE, snapToPc } from "@/services/phone";
 import { getDesktopBridge } from "@/services/hermes/bridge";
 import { TalkStylePicker } from "./TalkStylePicker";
 import { cn } from "@/lib/utils";
@@ -27,6 +27,8 @@ export function Composer({ compact = false }: { compact?: boolean }) {
   // Hermes reads them from disk, so it needs their real paths).
   const [files, setFiles] = useState<{ path: string; name: string }[]>([]);
   const [dragging, setDragging] = useState(false);
+  // Which half of the window a file is over: attach it, or have VYRSE break it down right away.
+  const [zone, setZone] = useState<"attach" | "digest">("digest");
 
   // Dictation while VYRSE is the focused window lands here instead of another app.
   useEffect(() => {
@@ -53,7 +55,9 @@ export function Composer({ compact = false }: { compact?: boolean }) {
       if (depth === 0) setDragging(false);
     };
     const onOver = (e: DragEvent) => {
-      if (hasFiles(e)) e.preventDefault();
+      if (!hasFiles(e)) return;
+      e.preventDefault();
+      setZone(e.clientX < window.innerWidth / 2 ? "attach" : "digest");
     };
     const onDrop = (e: DragEvent) => {
       if (!hasFiles(e)) return;
@@ -67,6 +71,11 @@ export function Composer({ compact = false }: { compact?: boolean }) {
         return;
       }
       const added = dropped.map((f) => ({ path: desktop.pathForFile(f), name: f.name })).filter((f) => f.path);
+      if (e.clientX >= window.innerWidth / 2 && added.length && !busyRef.current) {
+        // "Break it down": straight to VYRSE, which fills the board with what's in it.
+        send(added.length === 1 ? "Break this down for me." : "Break these down for me.", { attachments: added.slice(0, 4) });
+        return;
+      }
       setFiles((prev) => [...prev, ...added.filter((a) => !prev.some((p) => p.path === a.path))].slice(0, 8));
       ref.current?.focus();
     };
@@ -80,7 +89,18 @@ export function Composer({ compact = false }: { compact?: boolean }) {
       window.removeEventListener("dragover", onOver);
       window.removeEventListener("drop", onDrop);
     };
-  }, [notify]);
+  }, [notify, send]);
+  const busyRef = useRef(busy);
+  busyRef.current = busy;
+
+  // Phone: snap a photo for the PC to look at (homework, a receipt, a whiteboard, a menu, a product…).
+  const camera = useRef<HTMLInputElement>(null);
+  const snap = async (file: File | undefined) => {
+    if (!file) return;
+    notify("Sending to your PC…");
+    const res = await snapToPc(file);
+    notify(res.ok ? "On your PC now." : res.error ?? "Couldn't send it to the PC.");
+  };
 
   const submit = () => {
     if (busy) {
@@ -98,8 +118,31 @@ export function Composer({ compact = false }: { compact?: boolean }) {
   return (
     <div className="w-full">
       {dragging && (
-        <div className="pointer-events-none fixed inset-3 z-50 grid place-items-center rounded-3xl border-2 border-dashed border-primary/60 bg-background/70 backdrop-blur-sm">
-          <p className="text-sm tracking-wide text-foreground/85">Drop files for VYRSE to read</p>
+        <div className="pointer-events-none fixed inset-3 z-50 grid grid-cols-2 gap-3 rounded-3xl bg-background/70 p-3 backdrop-blur-md">
+          <div
+            className={cn(
+              "grid place-items-center rounded-2xl border-2 border-dashed transition-[border-color,background-color,transform] duration-300",
+              zone === "attach" ? "scale-[1.01] border-foreground/50 bg-foreground/[0.04]" : "border-border",
+            )}
+          >
+            <p className="flex flex-col items-center gap-2 text-center">
+              <Paperclip className="size-6 text-muted-foreground" strokeWidth={1.5} />
+              <span className="font-display text-[17px] text-foreground/90">Attach</span>
+              <span className="text-[12px] text-muted-foreground">add it to your next message</span>
+            </p>
+          </div>
+          <div
+            className={cn(
+              "grid place-items-center rounded-2xl border-2 border-dashed transition-[border-color,background-color,transform,box-shadow] duration-300",
+              zone === "digest" ? "scale-[1.01] border-primary/70 bg-primary/[0.07] shadow-[0_0_60px_-10px] shadow-primary/40" : "border-border",
+            )}
+          >
+            <p className="flex flex-col items-center gap-2 text-center">
+              <Sparkles className={cn("size-6", zone === "digest" ? "text-primary" : "text-muted-foreground")} strokeWidth={1.5} />
+              <span className="font-display text-[17px] text-foreground">Break it down</span>
+              <span className="text-[12px] text-muted-foreground">PDFs, docs, slides, code, images, recordings</span>
+            </p>
+          </div>
         </div>
       )}
       {files.length > 0 && (
@@ -135,6 +178,29 @@ export function Composer({ compact = false }: { compact?: boolean }) {
           <span className="vyr-sheen-band" />
         </span>
         <TalkStylePicker />
+        {IS_PHONE && (
+          <>
+            <input
+              ref={camera}
+              type="file"
+              accept="image/*"
+              capture="environment"
+              className="hidden"
+              onChange={(e) => {
+                void snap(e.target.files?.[0]);
+                e.target.value = "";
+              }}
+            />
+            <button
+              type="button"
+              onClick={() => camera.current?.click()}
+              aria-label="Snap a photo for your PC"
+              className="grid size-8 shrink-0 place-items-center self-end rounded-full text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none"
+            >
+              <Camera className="size-[18px]" strokeWidth={1.6} />
+            </button>
+          </>
+        )}
         <textarea
           data-composer
           ref={ref}

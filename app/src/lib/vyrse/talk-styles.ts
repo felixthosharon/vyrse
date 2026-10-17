@@ -12,7 +12,8 @@ export const TALK_STYLES = [
   { id: "savage", label: "Savage", hint: "Roasts you alive, still gets it done" },
 ] as const;
 
-export type TalkStyle = (typeof TALK_STYLES)[number]["id"];
+/** A built-in style, or one the user made with VYRSE (vyrse_style), "custom:<name>". */
+export type TalkStyle = (typeof TALK_STYLES)[number]["id"] | `custom:${string}`;
 
 const STYLE_WORDS: Record<string, TalkStyle> = {
   normal: "normal", default: "normal", regular: "normal", standard: "normal",

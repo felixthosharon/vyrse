@@ -6,7 +6,7 @@ export type Role = "user" | "vyrse";
 
 export type ArtifactKind = "series" | "timeline" | "compare" | "flow" | "table" | "code" | "file" | "image" | "document" | "citation" | "system_status" | "progress" | "markdown"
   | "rings" | "stats" | "checklist" | "quiz" | "scorecard" | "flashcards"
-  | "gauges" | "cards" | "weather" | "timer" | "board" | "heatmap" | "log" | "app" | "picker" | "mindmap" | "folders";
+  | "gauges" | "cards" | "weather" | "timer" | "board" | "heatmap" | "log" | "app" | "picker" | "mindmap" | "folders" | "form";
 
 /**
  * Semantic presentation contract.
@@ -72,6 +72,10 @@ export interface Artifact {
   kind: ArtifactKind;
   title: string;
   caption?: string | undefined;
+  /** buttons under the item: tapping one sends `prompt` to VYRSE as the user's message */
+  actions?: { label: string; prompt: string }[] | undefined;
+  /** fields the user fills in on screen; `sent` = what they sent (the form then reads as sent) */
+  form?: { fields: FormField[]; submit: string; sent?: Record<string, string> } | undefined;
   series?: undefined | { label: string; value: number }[];
   timeline?: undefined | { at: string; label: string; detail?: string }[];
   compare?: undefined | { columns: string[]; rows: (string | number)[][] };
@@ -119,7 +123,7 @@ export interface Artifact {
     forecast?: { at: string; label: string; value: number }[];
   };
   /** a countdown: `ends_at` is epoch ms */
-  timer?: { label: string; ends_at: number; seconds: number };
+  timer?: { label: string; ends_at: number; seconds: number; paused_left?: number; stopped?: boolean };
   board?: { name: string; cards: { label: string; note?: string }[] }[];
   heatmap?: { cells: { label: string; value: number }[]; unit?: string };
   /** a vyrse_log log: totals plus the latest entries (`fresh`: the first entry was just added) */
@@ -147,8 +151,17 @@ export interface Artifact {
   at?: number;
 }
 
+export interface FormField {
+  label: string;
+  type: "text" | "number" | "date" | "time" | "select";
+  options?: string[];
+  placeholder?: string;
+}
+
 export interface QuizQuestion {
   question: string;
+  /** multiple choice: the user taps one (marked by the plugin, not the model) */
+  choices?: string[];
   answer?: string;
   correct?: boolean;
   right_answer?: string;
@@ -217,6 +230,10 @@ export interface Settings {
   volume: number;
   /** speak replies to typed messages too (not only spoken ones) */
   speakTyped: boolean;
+  /** remember text the user copies (on this PC; never passwords, codes or keys) */
+  clipboardMemory?: boolean;
+  /** a glowing cursor shows where VYRSE is clicking/typing while it drives an app (Esc stops it) */
+  ghostHands?: boolean;
   /** soft interface sounds (a card built, a step ticked, a timer done) */
   uiSounds: boolean;
   /** let the OS/browser boost quiet microphones */
@@ -231,6 +248,12 @@ export interface Settings {
   briefing: BriefingTime;
   /** how VYRSE talks (see talk-styles.ts) */
   talkStyle: TalkStyle;
+  /** the app's highlight colour and the orb's light */
+  accent?: Accent;
+  /** talk style -> Kokoro voice for that style ("" or missing = VYRSE's usual voice) */
+  styleVoices?: Record<string, string>;
+  /** talk styles the user made (read from the plugin; never saved back from here) */
+  customStyles?: { id: `custom:${string}`; label: string; hint: string }[];
   /** what VYRSE calls the user (first-run screen / Settings) */
   userName?: string;
   /** games for the daily briefing, comma-separated */
@@ -268,6 +291,7 @@ export const DEFAULT_SETTINGS: Settings = {
   quickShortcut: "alt+space",
   briefing: "off",
   talkStyle: "normal",
+  accent: "cyan",
   speakTyped: true,
   uiSounds: true,
   autoGain: true,
@@ -281,3 +305,5 @@ export const DEFAULT_SETTINGS: Settings = {
   textSize: 1,
   keyboardNav: true,
 };
+
+export type Accent = "cyan" | "violet" | "ember" | "mint" | "rose";

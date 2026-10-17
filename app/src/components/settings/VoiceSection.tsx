@@ -3,6 +3,7 @@ import type { MicTestResult } from "@/lib/voice/voice-controller";
 import { useVyrse } from "@/lib/vyrse/store";
 import { TALK_SHORTCUTS, DICTATE_SHORTCUTS, QUICK_SHORTCUTS, type DictateShortcut, type QuickShortcut, type TalkShortcut } from "@/lib/vyrse/types";
 import { Dropdown, Row, Section, Segmented, Slider, SwitchRow } from "./controls";
+import { TALK_STYLES } from "@/lib/vyrse/talk-styles";
 import { IS_PHONE } from "@/services/phone";
 import { WakeTraining } from "./WakeTraining";
 
@@ -10,8 +11,23 @@ import { WakeTraining } from "./WakeTraining";
  * Voice settings. Wake word, recognition and speech run in Hermes ("wairz" engine,
  * faster-whisper, Kokoro); these controls set how VYRSE listens and speaks.
  */
+/** A short, varied list of Kokoro's voices (they're all on this PC already). */
+const STYLE_VOICES = [
+  { value: "", label: "VYRSE's usual voice" },
+  { value: "af_heart", label: "Heart · warm (US)" },
+  { value: "af_bella", label: "Bella · bright (US)" },
+  { value: "af_nicole", label: "Nicole · soft, close (US)" },
+  { value: "af_sky", label: "Sky · light (US)" },
+  { value: "bf_emma", label: "Emma · calm (UK)" },
+  { value: "am_puck", label: "Puck · playful (US)" },
+  { value: "am_michael", label: "Michael · deep (US)" },
+  { value: "am_fenrir", label: "Fenrir · bold (US)" },
+  { value: "bm_george", label: "George · composed (UK)" },
+];
+
 export function VoiceSection() {
   const { settings: s, setSettings, micLive, listening, agent, setSttModel, testMicrophone, phoneWake, setPhoneWake } = useVyrse();
+  const styleName = TALK_STYLES.find((t) => t.id === s.talkStyle)?.label ?? s.customStyles?.find((t) => t.id === s.talkStyle)?.label ?? "this style";
   const [devices, setDevices] = useState<{ value: string; label: string }[]>([]);
   const [outputs, setOutputs] = useState<{ value: string; label: string }[]>([]);
   const [testing, setTesting] = useState(false);
@@ -207,6 +223,14 @@ export function VoiceSection() {
             { value: "low", label: "Low" },
             { value: "medium", label: "Medium" },
           ]}
+        />
+      </Row>
+      <Row label={`Voice in ${styleName}`} hint="each talk style can have its own voice">
+        <Dropdown
+          value={s.styleVoices?.[s.talkStyle] ?? ""}
+          onChange={(v) => setSettings({ styleVoices: { ...(s.styleVoices ?? {}), [s.talkStyle]: v } })}
+          label="Voice for this talk style"
+          options={STYLE_VOICES}
         />
       </Row>
       <Row label="Voice volume" hint={`${Math.round(s.volume * 100)}%`}>

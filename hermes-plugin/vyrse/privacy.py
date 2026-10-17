@@ -4,13 +4,15 @@ from __future__ import annotations
 
 from typing import Any, Dict, Optional
 
-_ONLINE_TOOLS = {"web_search", "web_extract", "vyrse_skills", "vyrse_alexa"}
+_ONLINE_TOOLS = {"web_search", "web_extract", "vyrse_skills", "vyrse_alexa", "vyrse_chrome"}
 
 
 def is_online(tool_name: str, args: Optional[Dict[str, Any]]) -> bool:
     if tool_name in _ONLINE_TOOLS or tool_name.startswith("browser"):
         return True
-    # Workspace images fetched from the web.
+    # Looking up how-to steps on the web; workspace images fetched from the web.
+    if tool_name == "vyrse_point" and (args or {}).get("action") == "how":
+        return True
     return tool_name == "vyrse_workspace" and bool((args or {}).get("url"))
 
 

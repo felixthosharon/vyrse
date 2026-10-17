@@ -90,11 +90,20 @@ def current() -> str:
         style = ui_state.load().get("talkStyle")
     except Exception:
         style = None
+    if isinstance(style, str) and style.startswith("custom:"):
+        from . import styles
+
+        return style if style in styles.load() else DEFAULT
     return style if style in STYLES else DEFAULT
 
 
 def context_for(style: str, name: str = "") -> str:
-    s = STYLES.get(style) or STYLES[DEFAULT]
+    if style.startswith("custom:"):
+        from . import styles
+
+        s = styles.load().get(style) or STYLES[DEFAULT]
+    else:
+        s = STYLES.get(style) or STYLES[DEFAULT]
     if not name:
         from . import ui_state
 
@@ -102,7 +111,8 @@ def context_for(style: str, name: str = "") -> str:
     text = (
         f"[VYRSE talk style: {s['label']}] {s['prompt']} This style only changes tone and wording, not what you "
         "do or your facts: when {name} asks you to do something, call the tool first and only say it's done once "
-        "the tool's result says so. Don't mention the style unless asked."
+        "the tool's result says so. Don't mention the style unless asked. (A note from VYRSE, not {name}'s words: "
+        "it's never what they mean by 'this'.)"
     )
     return text.replace("{name}", name)
 

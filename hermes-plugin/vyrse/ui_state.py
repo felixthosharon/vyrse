@@ -31,9 +31,10 @@ CHOICES: Dict[str, Tuple[str, ...]] = {
     "glass": ("liquid", "subtle", "off"),
     "briefing": ("off", "start", "07:00", "08:00", "09:00", "10:00"),
     "talkStyle": ("normal", "vibe", "fam", "chill", "hype", "focus", "pro", "savage"),
+    "accent": ("cyan", "violet", "ember", "mint", "rose"),
 }
 BOOLEANS = ("voiceResponses", "voiceActivation", "autoListen", "reducedMotion", "highContrast", "keyboardNav",
-            "speakTyped", "autoGain")
+            "speakTyped", "autoGain", "clipboardMemory", "ghostHands")
 NUMBERS: Dict[str, Tuple[float, float]] = {"textSize": (0.9, 1.25), "micSensitivity": (0.1, 1.2), "volume": (0.0, 1.0)}
 STRINGS = ("micDevice", "outputDevice", "userName", "briefingGames")
 
@@ -48,7 +49,33 @@ def validate(patch: Dict[str, Any]) -> Tuple[Dict[str, Any], Dict[str, str]]:
     ok: Dict[str, Any] = {}
     errors: Dict[str, str] = {}
     for key, value in (patch or {}).items():
-        if key in CHOICES:
+        if key == "talkStyle" and isinstance(value, str) and value.startswith("custom:"):
+            # a style the user made (vyrse_style); only one that still exists
+            try:
+                from . import styles
+            except ImportError:  # loaded standalone by the dashboard API
+                import importlib.util, sys
+                spec = importlib.util.spec_from_file_location("vyrse_plugin_styles", Path(__file__).with_name("styles.py"))
+                styles = sys.modules.get("vyrse_plugin_styles") or importlib.util.module_from_spec(spec)
+                if "vyrse_plugin_styles" not in sys.modules:
+                    sys.modules["vyrse_plugin_styles"] = styles
+                    spec.loader.exec_module(styles)
+            if value in styles.load():
+                ok[key] = value
+            else:
+                errors[key] = "no such custom style"
+        elif key == "styleVoices":
+            # talk style -> Kokoro voice ("" removes); kept small and to plain voice ids
+            import re as _re
+
+            if isinstance(value, dict) and len(value) <= 24 and all(
+                isinstance(k, str) and len(k) <= 40 and isinstance(v, str) and (v == "" or _re.fullmatch(r"[a-z]{2}_[a-z]{2,16}", v))
+                for k, v in value.items()
+            ):
+                ok[key] = {k: v for k, v in value.items() if v}
+            else:
+                errors[key] = "must map talk styles to voice ids like af_heart"
+        elif key in CHOICES:
             if value in CHOICES[key]:
                 ok[key] = value
             else:

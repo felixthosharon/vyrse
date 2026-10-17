@@ -15,7 +15,7 @@
         --fg: oklch(0.925 0.006 250);
         --muted: oklch(0.685 0.01 250);
         --primary: oklch(0.8 0.072 214);
-        --fill: oklch(0.19 0.011 250 / 0.9);
+        --fill: oklch(0.17 0.012 250 / 0.99);
         --rim: oklch(1 0 0 / 0.26);
         --rim-low: oklch(1 0 0 / 0.06);
         --spec: oklch(1 0 0 / 0.09);
@@ -28,7 +28,7 @@
         --fg: oklch(0.24 0.014 250);
         --muted: oklch(0.46 0.012 250);
         --primary: oklch(0.5 0.084 226);
-        --fill: oklch(0.975 0.003 240 / 0.93);
+        --fill: oklch(0.985 0.003 240 / 0.985);
         --rim: oklch(1 0 0 / 0.95);
         --rim-low: oklch(0.3 0.014 250 / 0.12);
         --spec: oklch(1 0 0 / 0.6);
@@ -73,6 +73,14 @@
         pointer-events: none;
       }
       body.shown .bar { opacity: 1; transform: none; }
+      /* liquid: a soft accent glow drifting under the glass (clipped to the bar; the text sits on the solid fill) */
+      .bar .liquid { position: absolute; inset: 0; z-index: -1; border-radius: inherit; overflow: hidden; pointer-events: none; }
+      .bar .liquid::before { content: ""; position: absolute; width: 60%; height: 220%; left: -14%; top: -60%;
+        border-radius: 45% 55% 60% 40% / 50% 45% 55% 50%;
+        background: radial-gradient(closest-side, color-mix(in oklab, var(--primary) 16%, transparent), transparent);
+        filter: blur(20px); animation: drift 16s ease-in-out infinite alternate; }
+      @keyframes drift { to { transform: translate(120%, 8%) rotate(60deg); border-radius: 58% 42% 40% 60% / 45% 58% 42% 55%; } }
+      body.busy .bar .liquid::before { animation-duration: 6s; }
       .row { display: flex; align-items: center; gap: 14px; height: 60px; padding: 0 20px 0 22px; }
       .presence {
         position: relative; width: 10px; height: 10px; flex: none; border-radius: 50%;
@@ -115,6 +123,7 @@
   </head>
   <body>
     <div class="bar" id="bar">
+      <div class="liquid" aria-hidden="true"></div>
       <div class="row">
         <span class="presence" aria-hidden="true"></span>
         <input id="input" placeholder="Ask VYRSE…" autocomplete="off" spellcheck="false" aria-label="Ask VYRSE" />

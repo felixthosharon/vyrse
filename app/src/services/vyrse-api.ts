@@ -1,3 +1,4 @@
+import type { WorkspaceUpdate } from "./hermes/workspace-interact";
 import type { Artifact, Message, PresentationMode, Settings } from "@/lib/vyrse/types";
 
 /**
@@ -207,6 +208,12 @@ export type UiCommand =
   | { action: "notify"; text: string }
   /** Something VYRSE was watching for happened (a watch crossing its line): sound, card, said aloud. */
   | { action: "alert"; title: string; text: string }
+  /** draw over the user's screen: a ring around a control, the ghost cursor (vyrse_point, ghost hands) */
+  | { action: "overlay"; message: import("./hermes/bridge").OverlayMessage }
+  /** live captions of the PC's audio, in language `to` */
+  | { action: "captions"; op: "start" | "stop"; to: string }
+  /** start or stop recording a lecture/meeting in the app ("record this lecture") */
+  | { action: "record"; op: "start" | "stop"; title: string }
   /** a plugin tool asks the user to choose (e.g. "install this skill?"); answered via ui.answerConfirm */
   | { action: "confirm"; id: string; question: string; choices: string[] }
   /** a plugin tool needs the desktop app (e.g. Alexa); the result goes back via ui.answerDesktopCall */
@@ -290,9 +297,21 @@ export interface VyrseApi {
     savePrefs(patch: Partial<Settings>): Promise<void>;
     /** Teach it my voice: in-app wake-word training (vyrse plugin) */
     wakeTrain(op: "status" | "start" | "clear"): Promise<WakeTrainStatus>;
+    /** VYRSE's index of the main folders: status, or refresh = re-index now */
+    fileIndex(refresh?: boolean): Promise<{ files: number; built_at: number | null; building: boolean }>;
     wakeTrainSample(kind: "wake" | "other", pcm: Int16Array): Promise<WakeTrainStatus>;
     unloadLocalModels(): Promise<number>;
     answerConfirm(id: string, choice: string | null): Promise<void>;
+    /** save a recording made in the app on the PC (for vyrse_notes); returns where it went */
+    uploadRecording(audio: Blob, title: string): Promise<{ ok: boolean; path?: string; error?: string }>;
+    /** live captions: one phrase of the PC's audio (16 kHz mono) -> the line, translated into `to` if needed */
+    captionsChunk(pcm: Int16Array, to: string, session: string): Promise<{ text: string; original?: string; lang?: string }>;
+    /** load the captions speech model now (as captions start) */
+    captionsWarm(): Promise<void>;
+    /** the user clicked the ringed control (a walkthrough moves on) */
+    pointClicked?(): Promise<void>;
+    /** Esc while VYRSE drives an app: stop clicking now */
+    pointStop?(): Promise<void>;
     answerDesktopCall(id: string, result: unknown): Promise<void>;
     getVoiceMonkey(): Promise<VoiceMonkeyView>;
     /** token "" removes the setup; omitted fields stay as they are */
@@ -303,6 +322,8 @@ export interface VyrseApi {
     clearWorkspace(conversationId: string): Promise<void>;
     /** the user ticked a checklist line */
     checkWorkspaceItem(conversationId: string, id: string, index: number, done: boolean): Promise<void>;
+    /** the user changed an item (timer controls, a board card moved, a form sent) */
+    updateWorkspaceItem(conversationId: string, id: string, update: WorkspaceUpdate): Promise<void>;
   };
 
   voice?: VoiceBackend;

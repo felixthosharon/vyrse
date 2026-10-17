@@ -270,6 +270,16 @@ class KokoroTTSProvider(TTSProvider):
         _Engine.release()
 
 
+def _style_voice() -> Optional[str]:
+    """The voice the user picked for the current talk style (Settings -> Voice), if any."""
+    try:
+        from . import talk_styles, ui_state
+
+        return (ui_state.load().get("styleVoices") or {}).get(talk_styles.current()) or None
+    except Exception:
+        return None
+
+
 class KokoroStreamer(StreamingTTSProvider):
     """Sentence-level streaming for /api/audio/speak-stream: one PCM chunk per sentence."""
 
@@ -280,6 +290,6 @@ class KokoroStreamer(StreamingTTSProvider):
         return _Engine.available()
 
     def stream(self, text: str) -> Iterator[bytes]:
-        audio, sample_rate = _Engine.synth(text, self.section.get("voice"), self.section.get("speed"))
+        audio, sample_rate = _Engine.synth(text, _style_voice() or self.section.get("voice"), self.section.get("speed"))
         self.sample_rate = sample_rate
         yield _to_pcm16(audio)

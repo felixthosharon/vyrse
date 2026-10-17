@@ -62,7 +62,40 @@ export const IPC_CHANNELS = {
   quickOpenMain: 'vyrse:quick-open-main',
   phone: 'vyrse:phone',
   phoneStatus: 'vyrse:phone-status',
+  overlay: 'vyrse:overlay',
+  overlayShow: 'vyrse:overlay-show',
+  overlayIdle: 'vyrse:overlay-idle',
+  overlayStop: 'vyrse:overlay-stop',
+  overlayClicked: 'vyrse:overlay-clicked',
+  snap: 'vyrse:snap',
 } as const
+
+/**
+ * What VYRSE draws over the screen (main/overlay.ts): a ring around a real control ("show me where"), the ghost
+ * cursor while it drives an app, live captions. `rect` is in physical screen pixels.
+ */
+export interface OverlayMessage {
+  kind: 'point' | 'ghost' | 'captions' | 'clear'
+  op?: 'show' | 'move' | 'end'
+  rect?: { x: number; y: number; width: number; height: number }
+  /** point: the control's name; ghost: what VYRSE is doing; captions: the (translated) line */
+  label?: string
+  caption?: string
+  /** point: "2 / 4" */
+  step?: string
+  /** captions: the line as spoken, when translated */
+  original?: string
+  lang?: string
+  /** point: keep the ring until the user clicks inside it (or a minute passes) */
+  hold?: boolean
+}
+
+/** A photo the phone just took for the PC ("Snap"). */
+export interface SnapPhoto {
+  dataUrl: string
+  path: string
+  from: string
+}
 
 /** What the floating orb shows; sent by the main window's renderer. */
 export interface OrbState {
@@ -148,6 +181,19 @@ export interface VyrseBridge {
     /** phone bridge: status, enable, disable, pair, cancelPair, remove {id}, allowFirewall */
     phone(op: string, args?: Record<string, unknown>): Promise<unknown>
     onPhoneStatus(callback: (status: PhoneBridgeStatus) => void): () => void
+    /** main window: draw over the screen (see OverlayMessage) */
+    overlay(message: OverlayMessage): void
+    /** Esc pressed while VYRSE was driving an app */
+    onOverlayStop(callback: () => void): () => void
+    /** the user clicked inside a "show me where" ring (it has gone) */
+    onOverlayClicked(callback: () => void): () => void
+    /** a photo the phone snapped for the PC */
+    onSnap(callback: (photo: SnapPhoto) => void): () => void
+  }
+  /** overlay windows */
+  overlayPage: {
+    onShow(callback: (message: OverlayMessage) => void): () => void
+    idle(): void
   }
   /** quick-ask bar window */
   quick: {

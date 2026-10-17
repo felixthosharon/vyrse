@@ -1,3 +1,4 @@
+import type { WorkspaceUpdate } from "./workspace-interact";
 import type { Artifact, Settings } from "@/lib/vyrse/types";
 import type { AlexaOp, PhoneAction, ReasoningLevel, UiCommand, VoiceMonkeyView, WakeTrainStatus } from "../vyrse-api";
 import type { HermesGateway } from "./gateway";
@@ -9,7 +10,7 @@ const REASONING = new Set(["none", "low", "medium", "high"]);
 const ALEXA_OPS = new Set(["status", "command", "speak", "announce"]);
 const PHONE_ACTIONS = new Set([
   "battery", "flashlight", "find", "media", "volume", "notifications", "notify", "status",
-  "screen", "screenshot", "tap", "long_press", "type", "swipe", "key", "open_app", "open_url",
+  "screen", "screenshot", "tap", "long_press", "type", "swipe", "key", "open_app", "open_url", "send_file",
 ]);
 
 /**
@@ -41,6 +42,26 @@ export function parseUiCommand(payload: unknown): UiCommand | null {
       return REASONING.has(String(p["level"])) ? { action: "reasoning", level: p["level"] as ReasoningLevel } : null;
     case "notify":
       return typeof p["text"] === "string" && p["text"] ? { action: "notify", text: p["text"].slice(0, 200) } : null;
+    case "overlay": {
+      const kind = p["kind"];
+      if (kind !== "point" && kind !== "ghost" && kind !== "clear") return null;
+      const r = p["rect"] as Record<string, unknown> | undefined;
+      const n = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? Math.round(v) : null);
+      const rect = r && n(r["x"]) !== null && n(r["y"]) !== null && (n(r["width"]) ?? 0) > 0 && (n(r["height"]) ?? 0) > 0
+        ? { x: n(r["x"])!, y: n(r["y"])!, width: n(r["width"])!, height: n(r["height"])! }
+        : undefined;
+      const op = p["op"] === "end" ? "end" : p["op"] === "move" ? "move" : "show";
+      const text = (k: string, max: number) => (typeof p[k] === "string" && p[k] ? { [k]: (p[k] as string).slice(0, max) } : {});
+      return { action: "overlay", message: { kind, op, ...(rect ? { rect } : {}), ...text("label", 80), ...text("caption", 140), ...text("step", 20), ...(p["hold"] === true ? { hold: true } : {}) } };
+    }
+    case "captions":
+      return p["op"] === "start" || p["op"] === "stop"
+        ? { action: "captions", op: p["op"], to: typeof p["to"] === "string" && /^[a-z]{2,3}$/.test(p["to"]) ? p["to"] : "en" }
+        : null;
+    case "record":
+      return p["op"] === "start" || p["op"] === "stop"
+        ? { action: "record", op: p["op"], title: typeof p["title"] === "string" ? p["title"].slice(0, 60) : "" }
+        : null;
     case "alert":
       return typeof p["text"] === "string" && p["text"]
         ? { action: "alert", title: typeof p["title"] === "string" ? p["title"].slice(0, 80) : "", text: p["text"].slice(0, 240) }
@@ -102,6 +123,37 @@ export class HermesUiControl {
     });
   }
 
+  /** the user clicked the ringed control: a walkthrough moves to its next step */
+  async pointClicked(): Promise<void> {
+    await this.gateway.rest("/api/plugins/vyrse/point/clicked", { method: "POST" });
+  }
+
+  /** Esc while VYRSE drives: it stops clicking at once */
+  async pointStop(): Promise<void> {
+    await this.gateway.rest("/api/plugins/vyrse/point/stop", { method: "POST" });
+  }
+
+  async captionsWarm(): Promise<void> {
+    await this.gateway.rest("/api/plugins/vyrse/captions/warm", { method: "POST" });
+  }
+
+  async captionsChunk(pcm: Int16Array, to: string, session: string): Promise<{ text: string; original?: string; lang?: string }> {
+    return this.gateway.rest(`/api/plugins/vyrse/captions/chunk?to=${encodeURIComponent(to)}&session=${encodeURIComponent(session)}`, {
+      method: "POST",
+      body: new Blob([pcm.buffer as ArrayBuffer]),
+      headers: { "Content-Type": "application/octet-stream" },
+    });
+  }
+
+  async uploadRecording(audio: Blob, title: string): Promise<{ ok: boolean; path?: string; error?: string }> {
+    const ext = audio.type.includes("ogg") ? ".ogg" : audio.type.includes("mp4") ? ".m4a" : ".webm";
+    return this.gateway.rest(`/api/plugins/vyrse/notes/upload?title=${encodeURIComponent(title)}&ext=${ext}`, {
+      method: "POST",
+      body: audio,
+      headers: { "Content-Type": "application/octet-stream" },
+    });
+  }
+
   async answerConfirm(id: string, choice: string | null): Promise<void> {
     await this.gateway.rest(`/api/plugins/vyrse/confirm/${encodeURIComponent(id)}`, {
       method: "POST",
@@ -144,6 +196,17 @@ export class HermesUiControl {
     await this.gateway.rest(`/api/plugins/vyrse/workspace/${encodeURIComponent(conversationId)}/check`, {
       method: "POST",
       body: JSON.stringify({ id, index, done }),
+    });
+  }
+
+  async fileIndex(refresh = false): Promise<{ files: number; built_at: number | null; building: boolean }> {
+    return this.gateway.rest("/api/plugins/vyrse/files/index", refresh ? { method: "POST" } : {});
+  }
+
+  async updateWorkspaceItem(conversationId: string, id: string, update: WorkspaceUpdate): Promise<void> {
+    await this.gateway.rest(`/api/plugins/vyrse/workspace/${encodeURIComponent(conversationId)}/update`, {
+      method: "POST",
+      body: JSON.stringify({ id, op: update.op, args: update.args }),
     });
   }
 

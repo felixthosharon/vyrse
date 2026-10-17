@@ -15,7 +15,7 @@ from typing import Any, Dict, List, Optional
 
 KINDS = ("chart", "table", "markdown", "image", "code", "timeline", "steps", "status", "progress",
          "rings", "stats", "checklist", "quiz", "scorecard", "flashcards",
-         "gauges", "cards", "weather", "timer", "board", "heatmap", "app", "picker", "mindmap")
+         "gauges", "cards", "weather", "timer", "board", "heatmap", "app", "picker", "mindmap", "form")
 _MAX_IMAGE_BYTES = 6 * 1024 * 1024
 _MAX_ROWS = 500
 _MAX_POINTS = 400
@@ -51,7 +51,10 @@ SCHEMA: Dict[str, Any] = {
         "--card --border). For tracking/logging use vyrse_log. Never draw ASCII charts or open an external "
         "viewer. action=show (same id updates in place, e.g. re-show id='gpu' gauges every few seconds); "
         "remove (id); clear; focus (id: show just that item, big; no id = show all); "
-        "layout (split|focus|compact; focus makes the workspace the main view)."
+        "layout (split|focus|compact; focus makes the workspace the main view). Interactive: buttons on ANY item "
+        "(lines 'Label :: what tapping it tells you', e.g. 'Make it cheaper :: Make the plan cheaper') come back to you "
+        "as the user's message; form (fields = lines 'Label :: text|number|date|time|select :: options a/b/c'; submit = "
+        "button text) asks the user for details on screen and sends you what they filled in."
     ),
     "parameters": {
         "type": "object",
@@ -135,6 +138,9 @@ SCHEMA: Dict[str, Any] = {
             "review": {"type": "string", "description": "kind=scorecard: what to revise next."},
             "message": {"type": "string", "description": "kind=progress."},
             "subject": {"type": "string", "description": "kind=quiz/scorecard: e.g. 'Physics · Unit 3'."},
+            "buttons": {"type": "string", "description": "Any kind: up to 4 lines 'Label :: message sent to you when tapped'."},
+            "fields": {"type": "string", "description": "kind=form: one per line 'Label :: type :: options' (type text|number|date|time|select)."},
+            "submit": {"type": "string", "description": "kind=form: the button text, e.g. 'Plan it'."},
             "layout": {"type": "string", "enum": ["split", "focus", "compact"]},
             "focus": {"type": "boolean", "description": "action=show: also show this item on its own, big."},
         },
@@ -202,7 +208,7 @@ def _items(p: Dict[str, Any], limit: int) -> List[Dict[str, Any]]:
         return [{"label": c, "value": v, **({"unit": p["unit"]} if p.get("unit") and p.get("kind") != "stats" else {})}
                 for c, v in zip(cols, rows[0])][:limit]
     raw = [i for i in (p.get("items") or []) if i not in ({}, None)] or (p.get("rows") or [])
-    if not raw and p.get("kind") in ("stats", "status", "gauges", "rings", "heatmap"):
+    if not raw and p.get("kind") in ("stats", "status", "gauges", "rings", "heatmap", "quiz"):
         raw = [i for i in (p.get("points") or []) if isinstance(i, dict)]  # chart-shaped label/value points
     for i in raw[:limit]:
         if isinstance(i, dict):
@@ -302,12 +308,30 @@ def _outline(text: str) -> List[Any]:
 def build_artifact(p: Dict[str, Any]) -> Dict[str, Any]:
     """Validated, size-capped artifact in the shape VYRSE renders. Raises ValueError on bad input."""
     kind = p.get("kind")
+    # a chart style named as the kind ("donut", "pie", "bar", "line"): local models do this a lot
+    if kind in ("donut", "pie", "bar", "line"):
+        p = {**p, "kind": "chart", "style": p.get("style") or ("donut" if kind == "pie" else kind)}
+        kind = "chart"
     if kind not in KINDS:
         raise ValueError(f"kind must be one of {', '.join(KINDS)}")
     title = _text(p.get("title") or _page_title(p) or kind.title(), 120)
     art: Dict[str, Any] = {"id": _slug(str(p.get("id") or title)), "title": title}
     if p.get("caption"):
         art["caption"] = _text(p["caption"], 240)
+    # Buttons on any item: tapping one sends its message to VYRSE as the user's.
+    actions = []
+    raw_buttons = p.get("buttons")
+    lines = raw_buttons if isinstance(raw_buttons, list) else str(raw_buttons or "").splitlines()
+    for line in lines[:4]:
+        if isinstance(line, dict):
+            label, prompt = _text(line.get("label"), 40), _text(line.get("prompt") or line.get("message") or line.get("label"), 300)
+        else:
+            parts = [x.strip() for x in str(line).split("::", 1)]
+            label, prompt = _text(parts[0].lstrip("-*• ").strip(), 40), _text(parts[-1], 300)
+        if label and prompt:
+            actions.append({"label": label, "prompt": prompt})
+    if actions:
+        art["actions"] = actions
     if kind == "chart":
         points: List[Dict[str, Any]] = []
         for pt in (p.get("points") or [])[:_MAX_POINTS]:
@@ -427,9 +451,11 @@ def build_artifact(p: Dict[str, Any]) -> Dict[str, Any]:
     elif kind == "quiz":
         qs = []
         for i in _items(p, 30):
-            if not i.get("question"):
+            # local models label questions every which way; take whichever text field they used
+            text = next((i[k] for k in ("question", "q", "label", "text", "front", "prompt") if isinstance(i.get(k), str) and i[k].strip()), "")
+            if not text:
                 continue
-            q: Dict[str, Any] = {"question": _text(i["question"], 300)}
+            q: Dict[str, Any] = {"question": _text(text, 300)}
             if i.get("answer") not in (None, ""):
                 q["answer"] = _text(i["answer"], 200)
             # Only an answered question can be marked (and only then is the right answer shown).
@@ -458,14 +484,41 @@ def build_artifact(p: Dict[str, Any]) -> Dict[str, Any]:
             **{k: _text(p[k], lim) for k, lim in (("verdict", 60), ("subject", 60), ("review", 200)) if p.get(k)},
         })
     elif kind == "flashcards":
-        cards = [{"front": _text(i.get("front"), 300), "back": _text(i.get("back"), 600)}
-                 for i in _items(p, 60) if i.get("front") and i.get("back")]
+        cards = []
+        raw = _items(p, 60) or [i for i in (p.get("points") or []) if isinstance(i, dict)][:60]
+        for i in raw:
+            # whichever names the model used: front/back, question/answer, term/definition, or one "Q :: A" label
+            front = next((i[k] for k in ("front", "question", "q", "term", "label") if isinstance(i.get(k), str) and i[k].strip()), "")
+            back = next((i[k] for k in ("back", "answer", "a", "definition") if isinstance(i.get(k), str) and i[k].strip()), "")
+            if front and not back and "::" in front:
+                front, back = (x.strip() for x in front.split("::", 1))
+            if front and back:
+                cards.append({"front": _text(front, 300), "back": _text(back, 600)})
         # Small models do far better writing lines of text than nested objects ('front :: back').
         cards += [{"front": _text(f, 300), "back": _text(b, 600)} for f, b in pairs_from_text(str(p.get("cards") or p.get("markdown") or ""))][: 60 - len(cards)]
         if not cards:
             raise ValueError("kind=flashcards needs cards: one per line, like \"What is SN2? :: One-step substitution\\n"
                              "What is chirality? :: Non-superimposable mirror images\"")
         art.update(kind="flashcards", flashcards=cards)
+    elif kind == "form":
+        fields = []
+        for line in str(p.get("fields") or "").splitlines()[:10]:
+            parts = [x.strip() for x in line.lstrip("-*• ").split("::")]
+            label = _text(parts[0], 60) if parts else ""
+            if not label:
+                continue
+            ftype = (parts[1].lower() if len(parts) > 1 else "text")
+            ftype = ftype if ftype in ("text", "number", "date", "time", "select") else "text"
+            field: Dict[str, Any] = {"label": label, "type": ftype}
+            if len(parts) > 2 and parts[2]:
+                if ftype == "select":
+                    field["options"] = [_text(o, 40) for o in re.split(r"[/,|]", parts[2]) if o.strip()][:12]
+                else:
+                    field["placeholder"] = _text(parts[2], 60)
+            fields.append(field)
+        if not fields:
+            raise ValueError("kind=form needs fields: lines 'Label :: type :: options'")
+        art.update(kind="form", form={"fields": fields, "submit": _text(p.get("submit") or "Send", 30)})
     elif kind == "gauges":
         gauges = []
         for i in _items(p, 6):
@@ -524,12 +577,19 @@ def build_artifact(p: Dict[str, Any]) -> Dict[str, Any]:
     elif kind == "board":
         groups: Dict[str, List[Dict[str, Any]]] = {}
         for i in _items(p, 60):
-            if not i.get("label"):
+            # Models also send a column with its cards as children ({group, children: [...]}) or a card with
+            # sub-steps ({label, group, children}): both become cards rather than an error.
+            children = [c for c in (i.get("children") or []) if isinstance(c, str) and c.strip()]
+            if not i.get("label") and not children:
                 continue
-            group = _text(i.get("group") or i.get("status") or "To do", 30)
+            group = _text(i.get("group") or i.get("status") or (i.get("label") if children and not i.get("group") else "") or "To do", 30)
             if group not in groups and len(groups) >= 6:
                 continue
-            groups.setdefault(group, []).append({"label": _text(i["label"], 160), **({"note": _text(i["note"], 160)} if i.get("note") else {})})
+            if i.get("label") and (i.get("group") or not children):
+                note = i.get("note") or (", ".join(children)[:160] if children else "")
+                groups.setdefault(group, []).append({"label": _text(i["label"], 160), **({"note": _text(note, 160)} if note else {})})
+            else:
+                groups.setdefault(group, []).extend({"label": _text(c, 160)} for c in children[:20])
         if not groups:
             raise ValueError("kind=board needs items: [{label, group}]")
         art.update(kind="board", board=[{"name": g, "cards": c} for g, c in groups.items()])
@@ -738,6 +798,59 @@ def store_check(session_id: str, item_id: str, index: int, done: bool) -> None:
             return
 
 
+def store_update(session_id: str, item_id: str, op: str, args: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """The user changed an item on the board (timer controls, a card moved between columns, a form sent).
+    Returns the updated item, or None when nothing changed."""
+    import time as _time
+
+    items = load_items(session_id)
+    art = next((a for a in items if a.get("id") == item_id), None)
+    if art is None:
+        return None
+    if op == "timer" and isinstance(art.get("timer"), dict):
+        t = art["timer"]
+        now_ms = int(_time.time() * 1000)
+        action = args.get("action")
+        if action == "pause" and "paused_left" not in t:
+            t["paused_left"] = max(0, int(t["ends_at"]) - now_ms)
+        elif action == "resume" and "paused_left" in t:
+            t["ends_at"] = now_ms + int(t.pop("paused_left"))
+        elif action == "add":
+            extra = int(max(1, min(120, float(args.get("minutes") or 5))) * 60_000)
+            if "paused_left" in t:
+                t["paused_left"] = int(t["paused_left"]) + extra
+            else:
+                t["ends_at"] = max(int(t["ends_at"]), now_ms) + extra
+            t["seconds"] = int(t.get("seconds", 0)) + extra // 1000
+        elif action == "stop":
+            t.pop("paused_left", None)
+            t["ends_at"] = now_ms
+            t["stopped"] = True
+        else:
+            return None
+    elif op == "board_move" and isinstance(art.get("board"), list):
+        cols = art["board"]
+        src, dst = args.get("from"), args.get("to")
+        label = str(args.get("label") or "")
+        if not (isinstance(src, int) and isinstance(dst, int) and 0 <= src < len(cols) and 0 <= dst < len(cols)):
+            return None
+        cards = cols[src].get("cards") or []
+        card = next((c for c in cards if c.get("label") == label), None)
+        if card is None:
+            return None
+        cards.remove(card)
+        dest = cols[dst].setdefault("cards", [])
+        pos = args.get("index")
+        dest.insert(pos if isinstance(pos, int) and 0 <= pos <= len(dest) else len(dest), card)
+    elif op == "form_sent" and isinstance(art.get("form"), dict):
+        values = args.get("values") if isinstance(args.get("values"), dict) else {}
+        art["form"]["sent"] = {_text(k, 60): _text(v, 300) for k, v in list(values.items())[:10]}
+    else:
+        return None
+    _save_items(session_id, items)
+    return art
+
+
 def store_remove(session_id: str, item_id: str) -> None:
     _save_items(session_id, [a for a in load_items(session_id) if a.get("id") != item_id])
 
@@ -793,7 +906,8 @@ _HINTS = [
     (re.compile(r"\bflash ?cards?\b|\brevision cards?\b", re.I),
      "Flashcards: vyrse_workspace kind=flashcards with cards = one per line 'question :: answer'."),
     (re.compile(r"\b(?:quiz|test) me\b|\bquiz (?:on|about)\b|\bgive me (?:a )?quiz\b", re.I),
-     "A quiz: vyrse_quiz action=start with text = one question per line 'question :: correct answer :: topic'."),
+     "A quiz: vyrse_quiz action=start with text = one question per line 'question :: correct answer :: topic :: "
+     "option | option | option | option' (one option is the answer; the user taps them on screen)."),
     (re.compile(r"\b(?:cpu|ram|memory|gpu|vram|disk|battery)\b.{0,40}\b(?:ring|donut|doughnut|chart|graph|visual)", re.I),
      "Usage as a share of a limit (CPU, RAM, GPU, disk, battery): vyrse_workspace rings or gauges, not a donut."),
 ]
@@ -804,6 +918,37 @@ _NUMBERS_NOTE = ("Several numbers: show them in the workspace, picking the pictu
 
 
 _DOING = [
+    (re.compile(r"^(?!.*(?:\d{2}|[$₹€£]|\d\s*k\b|\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\b|\bfrom\b.{1,30}\bto\b))(?=.{0,70}$).*\b(?:plan|organi[sz]e|arrange|help me plan)\b.{0,30}\b(?:trip|holiday|vacation|getaway|party|birthday|wedding|event|week|weekend|diet|workout|meal plan|budget|move|road ?trip)\b", re.I),
+     "They haven't said the details yet: ask for them on screen with ONE vyrse_workspace kind=form card (3-5 fields "
+     "that matter for this, e.g. where / when / budget as select Low/Mid/High / what they're into), submit = 'Plan it', "
+     "and a one-line reply. Don't invent a plan before they answer."),
+    (re.compile(r"\bwhere(?:'s| is| are| do i find| can i find)\b.{0,50}\b(?:button|menu|setting|settings|option|tab|icon|toggle|link|field|bar)\b|\bshow me where\b|\bpoint (?:to|at|me)\b|\bwalk me through\b|\bhow do i (?:turn on|turn off|enable|disable|change|find|export|save|open)\b.{0,40}\b(?:in|on) (?:this|here|it)\b", re.I),
+     "Point at it on their screen: vyrse_point action=show (target = the visible label, caption = what to do), or "
+     "action=steps for a walkthrough ('label :: what to do' lines). Don't click it unless they ask you to do it."),
+    (re.compile(r"\b(?:live )?(?:captions?|subtitles?)\b|\btranslate (?:this|the) (?:video|call|stream|audio|show|movie|clip)\b|\bwhat (?:are|is) (?:they|he|she) saying\b", re.I),
+     "Live captions of what's playing on the PC: vyrse_captions action=start (to = the language they want; default en) or stop."),
+    (re.compile(r"\bbreak (?:this|it|these|them) down\b|\bwhat'?s in (?:this|these) (?:file|pdf|doc|document)s?\b|\bgo through (?:this|these) (?:file|pdf|doc)", re.I),
+     "Break it down: vyrse_digest with path = the attached file (one call per file), then build the cards it suggests."),
+    (re.compile(r"\bsnapped this with my phone\b", re.I),
+     "A photo from their phone: read it with vyrse_screen image=<that path>. Work out what it is (a receipt, homework, a "
+     "whiteboard, a menu or sign in another language, a product, an error on a screen, a business card…) and build the "
+     "right cards with buttons for what they'd want next. Reply in two sentences."),
+    (re.compile(r"\brecord (?:this|the|my|a)\b.{0,20}\b(?:lecture|class|lesson|meeting|call|talk|seminar)\b|\bstop recording\b", re.I),
+     "Recording: vyrse_notes action=record (title = what it is) or action=stop."),
+    (re.compile(r"\b(?:notes|flash ?cards|summary|summari[sz]e|quiz me)\b.{0,40}\b(?:lecture|recording|class|meeting|audio|video|\.mp3|\.m4a|\.wav|\.mp4)\b", re.I),
+     "Notes from a recording: vyrse_notes action=transcribe (path, or 'latest'), then the summary, flashcards and a quiz offer."),
+    (re.compile(r"\b(?:how was my day|recap (?:my|the) day|(?:nightly|daily|end of (?:the )?day) recap|sum(?:marise|marize) my day)\b", re.I),
+     "The nightly recap: vyrse_system action=recap (it shows the card)."),
+    (re.compile(r"\b(?:check[- ]?up on|health check|diagnose|why is my (?:pc|computer|laptop) (?:so )?slow|speed up my (?:pc|computer)|pc doctor)\b", re.I),
+     "A PC check-up: vyrse_system action=doctor (it shows the findings); only fix things after a yes."),
+    (re.compile(r"\b(?:make|create|add|set up|save)\b.{0,20}\broutine\b", re.I),
+     "A routine: vyrse_routine action=create with name = the phrase that runs it and steps = what to do in order (name the tool for each)."),
+    (re.compile(r"\b(?:make|create|design|invent)\b.{0,20}\b(?:talk(?:ing)? style|personality|persona)\b|\btalk (?:to me )?like (?:my|a|an)\b", re.I),
+     "A talk style of their own: vyrse_style action=create (you write the prompt from what they described; ask one question first if it's vague)."),
+    (re.compile(r"\b(?:help me|i need to|time to|let'?s) (?:focus|concentrate|lock in|study)\b|\bfocus (?:mode|session|guardian)\b|\bkeep me (?:focused|off (?:youtube|my phone|games))", re.I),
+     "Focus: a workspace timer plus vyrse_focus action=start (same minutes) so VYRSE nudges them if they drift."),
+    (re.compile(r"\b(?:set (?:yourself|you|me) up|personal setup|(?:get|getting) to know (?:me|you)|redo (?:my )?(?:profile|setup)|personali[sz]e (?:yourself|you|vyrse))\b", re.I),
+     "The personal setup: load the vyrse-setup skill (skill_view) and follow it, starting with vyrse_profile action=start."),
     (re.compile(r"\b(?:set|make|add)\b.{0,12}\balarm\b|\bwake me(?: up)?\b.{0,20}\b(?:at|by|in)\b|\balarm (?:for|at)\b", re.I),
      "An alarm: vyrse_reminders action=create alarm=true schedule='<clock time, e.g. 8:30>' (it rings in VYRSE and shows a countdown)."),
     (re.compile(r"\b(?:clean(?: up)?|sort|organi[sz]e|tidy(?: up)?|declutter)\b.{0,20}\b(?:downloads?|desktop|documents|pictures|videos|folder)\b", re.I),
@@ -828,6 +973,12 @@ def hints(text: str) -> List[str]:
     import time as _time
 
     found = [note for pattern, note in _DOING if pattern.search(text)]
+    try:
+        from . import routines
+
+        found = routines.hint(text) + found
+    except Exception:
+        pass
     hour = _time.localtime().tm_hour
     if 0 <= hour < 5 and _LATE.search(text):
         found.insert(0, f"It's {_time.strftime('%H:%M')}, the middle of the night: in their talk style, tell them to sleep "
@@ -838,6 +989,8 @@ def hints(text: str) -> List[str]:
     plain = re.sub(r"(?<=\d),(?=\d{3}\b)", "", text)  # 2,450 is one number
     if len(re.findall(r"(?<![\d:/.-])\d+(?:\.\d+)?(?![\d:/-])", plain)) >= 3:
         found.append(_NUMBERS_NOTE)
+    if any(n.startswith("They haven't said the details yet") for n in found):
+        found = [n for n in found if not n.startswith("A plan:")]  # ask first; the plan comes after
     return found[:2]
 
 

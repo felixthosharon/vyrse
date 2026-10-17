@@ -1,3 +1,5 @@
+import { RecordingPill } from "./RecordingPill";
+import { CommandPalette } from "./CommandPalette";
 import { AlarmCard } from "./AlarmCard";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Minimize2, X } from "lucide-react";
@@ -119,6 +121,7 @@ export function VyrseApp() {
     root.classList.toggle("light", prefersLight);
     root.dataset["density"] = settings.density;
     root.dataset["glass"] = settings.glass ?? "liquid";
+    root.dataset["accent"] = settings.accent ?? "cyan";
     if (IS_PHONE) root.dataset["device"] = "phone";
     root.dataset["motion"] = settings.reducedMotion ? "reduced" : settings.animations;
     root.dataset["contrast"] = settings.highContrast ? "high" : "normal";
@@ -345,6 +348,8 @@ export function VyrseApp() {
       <ConfirmationDialog />
       <Toast />
       <AlarmCard />
+      <CommandPalette />
+      <RecordingPill />
       <Onboarding />
     </div>
   );

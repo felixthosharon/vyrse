@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'" />
+    <title>VYRSE overlay</title>
+    <style>
+      /* Drawn over the user's whole screen; click-through. Everything fades in and out, nothing jumps. */
+      :root {
+        --accent: #5fd4ee;
+        --accent-soft: rgba(95, 212, 238, 0.35);
+        --glass: rgba(12, 14, 19, 0.93);
+        --rim: rgba(255, 255, 255, 0.14);
+        --fg: rgba(240, 244, 248, 0.96);
+        --muted: rgba(240, 244, 248, 0.58);
+        --hot: #ff7a6b;
+        --ease: cubic-bezier(0.16, 0.84, 0.24, 1);
+      }
+      *, *::before, *::after { box-sizing: border-box; }
+      html, body { margin: 0; width: 100%; height: 100%; background: transparent; overflow: hidden; user-select: none; }
+      body { font: 500 14px/1.4 "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif; color: var(--fg); }
+      .glass {
+        background: radial-gradient(120% 60% at 20% -10%, rgba(255,255,255,0.09), transparent 60%), var(--glass);
+        border: 1px solid var(--rim);
+        box-shadow: inset 0 1px 0 rgba(255,255,255,0.08), 0 18px 50px -14px rgba(0,0,0,0.7);
+        backdrop-filter: blur(18px) saturate(1.4);
+      }
+      .fade { opacity: 0; transition: opacity 0.45s var(--ease), transform 0.55s var(--ease); }
+      .fade.on { opacity: 1; }
+
+      /* ---- show me where ---- */
+      #ring {
+        position: absolute; border-radius: 14px; pointer-events: none;
+        box-shadow: 0 0 0 2px var(--accent), 0 0 0 7px var(--accent-soft), 0 0 46px 10px var(--accent-soft);
+        transform: scale(1.35);
+      }
+      #ring.on { transform: scale(1); animation: breathe 1.6s ease-in-out 0.6s infinite; }
+      @keyframes breathe { 50% { box-shadow: 0 0 0 2px var(--accent), 0 0 0 11px rgba(95,212,238,0.18), 0 0 60px 16px var(--accent-soft); } }
+      #ring .ping { position: absolute; inset: -2px; border-radius: inherit; border: 2px solid var(--accent); animation: ping 1.6s var(--ease) infinite; }
+      @keyframes ping { from { opacity: 0.9; transform: scale(1); } to { opacity: 0; transform: scale(1.6); } }
+      #tip { position: absolute; z-index: 5; max-width: 340px; padding: 10px 14px; border-radius: 16px; transform: translateY(6px); }
+      #tip.on { transform: none; }
+      #tip .step { display: block; font: 600 10px/1 "Cascadia Mono", Consolas, monospace; letter-spacing: 0.16em; color: var(--accent); text-transform: uppercase; margin-bottom: 5px; }
+      #tip .name { font-weight: 650; }
+      #tip .cap { display: block; color: var(--muted); font-size: 13px; margin-top: 2px; }
+      #arrow { position: absolute; width: 46px; height: 46px; color: var(--accent); filter: drop-shadow(0 0 10px var(--accent-soft)); }
+
+      /* ---- ghost hands ---- */
+      #ghost { position: absolute; left: 0; top: 0; width: 30px; height: 30px; transition: transform 0.9s var(--ease), opacity 0.4s; will-change: transform; }
+      #ghost svg { filter: drop-shadow(0 0 12px var(--accent)) drop-shadow(0 0 3px var(--accent)); }
+      #ghost .halo { position: absolute; left: -16px; top: -16px; width: 32px; height: 32px; border-radius: 50%; background: radial-gradient(circle, var(--accent-soft), transparent 70%); }
+      #ghost.click .halo { animation: click 0.5s var(--ease); }
+      @keyframes click { from { transform: scale(0.4); opacity: 1; } to { transform: scale(2.4); opacity: 0; } }
+      .trail { position: absolute; width: 8px; height: 8px; margin: -4px 0 0 -4px; border-radius: 50%; background: var(--accent); opacity: 0.55; transition: opacity 0.7s, transform 0.7s; pointer-events: none; }
+
+      /* ---- live captions: liquid glass. A dense dark core keeps the words readable over anything; the liquid
+         is in the light: a slow accent blob drifting inside, a rim that catches light, lines that melt in. ---- */
+      #captions {
+        position: absolute; left: 50%; bottom: 7%; width: min(980px, 86vw); text-align: center;
+        padding: 16px 30px 18px; border-radius: 30px; overflow: hidden; isolation: isolate;
+        background: rgba(9, 11, 16, 0.975);
+        box-shadow: inset 0 1px 0 rgba(255,255,255,0.16), inset 0 -10px 24px -14px var(--accent-soft),
+          0 24px 60px -18px rgba(0,0,0,0.75), 0 0 0 1px rgba(255,255,255,0.05);
+        transform: translate(-50%, 14px) scale(0.97);
+        transition: opacity 0.45s var(--ease), transform 0.6s cubic-bezier(0.34, 1.4, 0.5, 1);
+      }
+      #captions.on { transform: translate(-50%, 0) scale(1); }
+      /* the liquid: two soft blobs of the accent colour, drifting and morphing behind the text */
+      #captions::before, #captions::after {
+        content: ""; position: absolute; z-index: -1; width: 46%; aspect-ratio: 1.6; border-radius: 42% 58% 61% 39% / 47% 41% 59% 53%;
+        background: radial-gradient(closest-side, var(--accent-soft), transparent); filter: blur(18px); opacity: 0.55;
+        animation: drift 14s ease-in-out infinite alternate;
+      }
+      #captions::before { left: -8%; top: -60%; }
+      #captions::after { right: -10%; bottom: -70%; animation-duration: 18s; animation-direction: alternate-reverse; opacity: 0.4; }
+      @keyframes drift {
+        0% { transform: translate(0, 0) rotate(0deg); border-radius: 42% 58% 61% 39% / 47% 41% 59% 53%; }
+        50% { transform: translate(18%, 22%) rotate(40deg); border-radius: 58% 42% 38% 62% / 55% 61% 39% 45%; }
+        100% { transform: translate(40%, 6%) rotate(80deg); border-radius: 50% 50% 45% 55% / 40% 55% 45% 60%; }
+      }
+      /* rim of light: bright along the top edge, fading round the sides */
+      #captions .rim { position: absolute; inset: 0; border-radius: inherit; padding: 1px; pointer-events: none;
+        background: linear-gradient(170deg, rgba(255,255,255,0.42), rgba(255,255,255,0.06) 32%, transparent 55%, var(--accent-soft) 100%);
+        -webkit-mask: linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0); mask: linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0); }
+      #captions .sheen { position: absolute; left: 8%; right: 8%; top: 0; height: 42%; border-radius: 0 0 50% 50%; pointer-events: none;
+        background: linear-gradient(rgba(255,255,255,0.07), transparent); }
+      #captions .orig { display: block; font-size: 14px; color: rgba(236,240,246,0.66); margin-bottom: 5px; }
+      #captions .line { display: block; font-size: 26px; line-height: 1.32; font-weight: 600; letter-spacing: -0.005em; color: #fbfdff;
+        text-shadow: 0 1px 2px rgba(0,0,0,0.6), 0 0 18px rgba(0,0,0,0.45); }
+      #captions .lang { position: absolute; top: 12px; left: 18px; font: 600 9.5px/1 "Cascadia Mono", Consolas, monospace; letter-spacing: 0.16em; color: #071016; background: var(--accent); border-radius: 999px; padding: 4px 8px; text-transform: uppercase; box-shadow: 0 0 14px var(--accent-soft); }
+      .swap { animation: swap 0.55s var(--ease); }
+      @keyframes swap { from { opacity: 0; transform: translateY(8px) scale(0.985); filter: blur(7px); } 60% { filter: blur(0); } }
+
+    </style>
+  </head>
+  <body>
+    <div id="ring" class="fade"><span class="ping"></span></div>
+    <svg id="arrow" class="fade" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 19 L18 6" /><path d="M9 6 H18 V15" /></svg>
+    <div id="tip" class="glass fade"><span class="step"></span><span class="name"></span><span class="cap"></span></div>
+
+    <div id="ghost" class="fade"><span class="halo"></span>
+      <svg width="26" height="30" viewBox="0 0 26 30"><path d="M3 2 L3 24 L9 18.5 L13.2 28 L17.4 26.2 L13.3 16.9 L21.5 16.9 Z" fill="#f4fbff" stroke="var(--accent)" stroke-width="1.6" stroke-linejoin="round" /></svg>
+    </div>
+
+    <div id="captions" class="fade"><span class="rim"></span><span class="sheen"></span><span class="lang"></span><span class="orig"></span><span class="line"></span></div>
+
+    <script src="overlay.js"></script>
+  </body>
+</html>

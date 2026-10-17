@@ -201,11 +201,117 @@ function Stamp({ q, current }: { q: QuizQuestion; current: boolean }) {
   );
 }
 
-export function Quiz({ data }: { data: NonNullable<Artifact["quiz"]> }) {
+const LETTERS = "ABCDEF";
+
+function norm(text: string): string {
+  return text.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+}
+
+/** The options of a multiple-choice question: tappable while it's the open one, then marked. */
+function Choices({
+  q,
+  open,
+  pending,
+  onPick,
+}: {
+  q: QuizQuestion;
+  open: boolean;
+  pending: string | null;
+  onPick?: ((choice: string) => void) | undefined;
+}) {
+  const answered = q.correct !== undefined;
+  const chosen = answered ? q.choices!.find((c) => norm(c) === norm(q.answer ?? "")) : pending;
+  const right = answered ? (q.correct ? chosen : q.choices!.find((c) => norm(c) === norm(q.right_answer ?? ""))) : undefined;
+  return (
+    <div data-card-chrome className="mt-3 grid gap-1.5 sm:grid-cols-2">
+      {q.choices!.map((c, i) => {
+        const isChosen = chosen !== undefined && chosen !== null && c === chosen;
+        const isRight = right !== undefined && c === right;
+        const tone = answered
+          ? isRight
+            ? "border-success/60 bg-success/12 text-foreground"
+            : isChosen
+              ? "border-accent/60 bg-accent/12 text-muted-foreground line-through decoration-accent/60"
+              : "border-border text-muted-foreground/70"
+          : isChosen
+            ? "border-primary/70 bg-primary/15 text-foreground"
+            : "border-border text-foreground/90 enabled:hover:border-primary/45 enabled:hover:bg-primary/[0.06]";
+        return (
+          <button
+            key={c}
+            type="button"
+            disabled={!open || !onPick || pending !== null}
+            onClick={() => onPick?.(c)}
+            className={cn(
+              "group flex items-center gap-2.5 rounded-xl border px-3 py-2 text-left text-[13.5px] transition-[background-color,border-color,transform] duration-200 enabled:active:scale-[0.98] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/60",
+              tone,
+              isChosen && !answered && "animate-pulse",
+            )}
+          >
+            <span
+              className={cn(
+                "grid size-6 shrink-0 place-items-center rounded-full border font-mono text-[10.5px] no-underline",
+                answered && isRight ? "border-success bg-success text-background" : answered && isChosen ? "border-accent bg-accent text-background" : "border-border-strong text-muted-foreground",
+              )}
+            >
+              {answered && isRight ? <Check className="size-3.5" strokeWidth={3} /> : answered && isChosen ? <X className="size-3.5" strokeWidth={3} /> : LETTERS[i]}
+            </span>
+            <span className="min-w-0">{c}</span>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+/** An open (typed) answer, right in the card. */
+function AnswerBox({ onAnswer }: { onAnswer: (text: string) => void }) {
+  const [text, setText] = useState("");
+  return (
+    <form
+      data-card-chrome
+      className="mt-3 flex items-center gap-2"
+      onSubmit={(e) => {
+        e.preventDefault();
+        if (text.trim()) onAnswer(text.trim());
+      }}
+    >
+      <input
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        placeholder="Type your answer…"
+        aria-label="Your answer"
+        className="min-w-0 flex-1 rounded-xl border border-border bg-background/40 px-3 py-2 text-[13.5px] text-foreground placeholder:text-muted-foreground/70 focus:border-primary/60 focus:outline-none"
+      />
+      <button
+        type="submit"
+        disabled={!text.trim()}
+        className="rounded-xl bg-primary px-3.5 py-2 text-[12.5px] font-medium text-primary-foreground transition-opacity disabled:opacity-40"
+      >
+        Answer
+      </button>
+    </form>
+  );
+}
+
+export function Quiz({ data, onAnswer }: { data: NonNullable<Artifact["quiz"]>; onAnswer?: ((text: string) => void) | undefined }) {
   const qs = data.questions;
   const current = qs.findIndex((q) => q.correct === undefined);
   const answered = qs.filter((q) => q.correct !== undefined);
   const right = answered.filter((q) => q.correct).length;
+  // The option just tapped, held until VYRSE marks it (the card updates and this clears).
+  const [pending, setPending] = useState<string | null>(null);
+  const [typed, setTyped] = useState(false);
+  useEffect(() => {
+    setPending(null);
+    setTyped(false);
+  }, [current]);
+  const pick = (choice: string) => {
+    if (!onAnswer) return;
+    playUiSound("tick-soft");
+    setPending(choice);
+    onAnswer(`My answer: ${choice}`);
+  };
   return (
     <div>
       <div className="mb-1 flex items-baseline justify-between gap-3">
@@ -230,8 +336,9 @@ export function Quiz({ data }: { data: NonNullable<Artifact["quiz"]> }) {
           <li
             key={i}
             className={cn(
-              "rounded-xl border bg-secondary/15 px-3.5 py-3 transition-colors",
+              "rounded-xl border bg-secondary/15 px-3.5 py-3 transition-[border-color,opacity] duration-300",
               q.correct === true ? "border-success/35" : q.correct === false ? "border-accent/40" : i === current ? "border-primary/45" : "border-border",
+              current >= 0 && i > current && "opacity-45",
             )}
           >
             <p className="font-mono text-[10px] tracking-[0.18em] text-primary uppercase">
@@ -241,17 +348,35 @@ export function Quiz({ data }: { data: NonNullable<Artifact["quiz"]> }) {
               <p className="min-w-0 flex-1 font-display text-[15px] leading-snug text-foreground">{q.question}</p>
               <Stamp q={q} current={i === current} />
             </div>
-            {q.answer && (
-              <p className="mt-2 text-[13px]">
-                <span className="mr-2 font-mono text-[10px] tracking-[0.16em] text-muted-foreground uppercase">you</span>
-                <span className={q.correct === false ? "text-muted-foreground line-through decoration-accent/60" : "text-foreground/90"}>{q.answer}</span>
-              </p>
-            )}
-            {q.correct === false && q.right_answer && (
-              <p className="mt-2 rounded-lg border border-accent/30 bg-accent/10 px-3 py-2 text-[13px] text-foreground">
-                <span className="mr-2 font-mono text-[10px] tracking-[0.16em] text-accent uppercase">answer</span>
-                {q.right_answer}
-              </p>
+            {q.choices && (i <= current || current < 0) ? (
+              <Choices q={q} open={i === current} pending={i === current ? pending : null} onPick={i === current ? (onAnswer ? pick : undefined) : undefined} />
+            ) : (
+              <>
+                {q.answer && (
+                  <p className="mt-2 text-[13px]">
+                    <span className="mr-2 font-mono text-[10px] tracking-[0.16em] text-muted-foreground uppercase">you</span>
+                    <span className={q.correct === false ? "text-muted-foreground line-through decoration-accent/60" : "text-foreground/90"}>{q.answer}</span>
+                  </p>
+                )}
+                {q.correct === false && q.right_answer && (
+                  <p className="mt-2 rounded-lg border border-accent/30 bg-accent/10 px-3 py-2 text-[13px] text-foreground">
+                    <span className="mr-2 font-mono text-[10px] tracking-[0.16em] text-accent uppercase">answer</span>
+                    {q.right_answer}
+                  </p>
+                )}
+                {i === current && onAnswer && !q.choices && (
+                  typed ? (
+                    <p className="mt-3 animate-pulse font-mono text-[11px] text-muted-foreground">checking…</p>
+                  ) : (
+                    <AnswerBox
+                      onAnswer={(text) => {
+                        setTyped(true);
+                        onAnswer(text);
+                      }}
+                    />
+                  )
+                )}
+              </>
             )}
             {q.note && q.correct !== undefined && (
               <p className={cn("mt-2 font-mono text-[11.5px]", q.correct ? "text-success" : "text-muted-foreground")}>{q.note}</p>
@@ -317,16 +442,99 @@ export function Scorecard({ data }: { data: NonNullable<Artifact["scorecard"]> }
   );
 }
 
-export function Flashcards({ data }: { data: NonNullable<Artifact["flashcards"]> }) {
-  const [index, setIndex] = useState(0);
+export function Flashcards({ data, onAsk }: { data: NonNullable<Artifact["flashcards"]>; onAsk?: ((text: string) => void) | undefined }) {
+  // The deck being studied (all cards, or just the missed ones on a second pass) and how each went.
+  const [deck, setDeck] = useState<number[]>(() => data.map((_, i) => i));
+  const [pos, setPos] = useState(0);
   const [flipped, setFlipped] = useState(false);
-  const card = data[Math.min(index, data.length - 1)]!;
+  const [marks, setMarks] = useState<Record<number, "known" | "again">>({});
+  useEffect(() => {
+    setDeck(data.map((_, i) => i));
+    setPos(0);
+    setMarks({});
+  }, [data.length]);
+  const finished = deck.every((i) => marks[i] !== undefined);
+  const cardIndex = deck[Math.min(pos, deck.length - 1)] ?? 0;
+  const card = data[cardIndex]!;
+  const known = deck.filter((i) => marks[i] === "known").length;
+  const missed = deck.filter((i) => marks[i] === "again");
   const go = (d: number) => {
     setFlipped(false);
-    setIndex((i) => (i + d + data.length) % data.length);
+    setPos((p) => (p + d + deck.length) % deck.length);
   };
+  const mark = (m: "known" | "again") => {
+    playUiSound(m === "known" ? "tick" : "tick-soft");
+    setMarks((all) => ({ ...all, [cardIndex]: m }));
+    setFlipped(false);
+    // on to the next card not yet marked
+    const next = deck.findIndex((i, k) => k > pos && marks[i] === undefined && i !== cardIndex);
+    const wrap = deck.findIndex((i) => marks[i] === undefined && i !== cardIndex);
+    setPos(next >= 0 ? next : wrap >= 0 ? wrap : pos);
+  };
+  if (finished) {
+    const frac = known / deck.length;
+    return (
+      <div className="flex flex-col items-center py-2 text-center">
+        <Ring fraction={frac} size={104} stroke={8} tone={frac >= 0.5 ? 2 : 1}>
+          <span className="font-display text-[22px] leading-none font-semibold text-foreground">
+            {known}
+            <span className="text-muted-foreground">/{deck.length}</span>
+          </span>
+        </Ring>
+        <p className="mt-3 font-display text-[17px] text-foreground">
+          {missed.length === 0 ? "You knew every one." : `${missed.length} to go over again.`}
+        </p>
+        <div data-card-chrome className="mt-4 flex flex-wrap justify-center gap-2">
+          {missed.length > 0 && (
+            <button
+              type="button"
+              onClick={() => {
+                setDeck(missed);
+                setPos(0);
+                setMarks({});
+              }}
+              className="rounded-full bg-primary px-4 py-1.5 text-[12.5px] font-medium text-primary-foreground"
+            >
+              Review the {missed.length} again
+            </button>
+          )}
+          {missed.length > 0 && onAsk && (
+            <button
+              type="button"
+              onClick={() => onAsk(`Quiz me on the flashcards I got wrong, one at a time, with options to tap: ${missed.map((i) => `"${data[i]!.front}"`).join(", ")}.`)}
+              className="liquid-hover relative rounded-full border border-border px-4 py-1.5 text-[12.5px] text-foreground/90"
+            >
+              Quiz me on those
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={() => {
+              setDeck(data.map((_, i) => i));
+              setPos(0);
+              setMarks({});
+            }}
+            className="liquid-hover relative rounded-full border border-border px-4 py-1.5 text-[12.5px] text-muted-foreground hover:text-foreground"
+          >
+            Start over
+          </button>
+        </div>
+      </div>
+    );
+  }
   return (
     <div>
+      <div className="mb-3 flex gap-1">
+        {deck.map((i, k) => (
+          <span
+            key={i}
+            className={cn(
+              "h-1 flex-1 rounded-full transition-colors duration-300",
+              marks[i] === "known" ? "bg-success" : marks[i] === "again" ? "bg-accent" : k === pos ? "bg-primary" : "bg-secondary/70",
+            )}
+          />
+        ))}
+      </div>
       <button
         type="button"
         onClick={() => {
@@ -354,17 +562,28 @@ export function Flashcards({ data }: { data: NonNullable<Artifact["flashcards"]>
           </span>
         </span>
       </button>
-      <div className="mt-3 flex items-center justify-between">
+      <div data-card-chrome className="mt-3 flex items-center justify-between gap-2">
         <button type="button" onClick={() => go(-1)} aria-label="Previous card" className="liquid-hover relative grid size-8 place-items-center rounded-full text-muted-foreground hover:text-foreground">
           <ChevronLeft className="size-4" strokeWidth={1.6} />
         </button>
-        <span className="flex items-center gap-2 font-mono text-[11px] text-muted-foreground">
-          {index + 1} / {data.length}
-          <span className="text-border-strong">·</span>
-          <span className="inline-flex items-center gap-1">
-            <RotateCcw className="size-3" strokeWidth={1.6} /> tap to flip
+        {flipped ? (
+          <span className="vyr-emerge flex gap-2">
+            <button type="button" onClick={() => mark("again")} className="rounded-full border border-accent/50 px-3.5 py-1 text-[12.5px] text-accent hover:bg-accent/10">
+              Again
+            </button>
+            <button type="button" onClick={() => mark("known")} className="rounded-full border border-success/50 bg-success/10 px-3.5 py-1 text-[12.5px] text-success hover:bg-success/20">
+              Got it
+            </button>
           </span>
-        </span>
+        ) : (
+          <span className="flex items-center gap-2 font-mono text-[11px] text-muted-foreground">
+            {pos + 1} / {deck.length}
+            <span className="text-border-strong">·</span>
+            <span className="inline-flex items-center gap-1">
+              <RotateCcw className="size-3" strokeWidth={1.6} /> tap to flip
+            </span>
+          </span>
+        )}
         <button type="button" onClick={() => go(1)} aria-label="Next card" className="liquid-hover relative grid size-8 place-items-center rounded-full text-muted-foreground hover:text-foreground">
           <ChevronRight className="size-4" strokeWidth={1.6} />
         </button>

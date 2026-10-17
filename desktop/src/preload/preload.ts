@@ -1,6 +1,6 @@
 import { contextBridge, ipcRenderer, webUtils, type IpcRendererEvent } from 'electron'
 
-import type { AlexaStatus, EchoSkillStatus, PhoneBridgeStatus, QuickUpdate, BackendConnection, BackendStatus, OrbState, VyrseBridge } from '../shared/backend-types'
+import type { AlexaStatus, EchoSkillStatus, OverlayMessage, PhoneBridgeStatus, SnapPhoto, QuickUpdate, BackendConnection, BackendStatus, OrbState, VyrseBridge } from '../shared/backend-types'
 
 // Sandboxed preloads cannot require local modules, so channel names are inlined
 // here; they must match IPC_CHANNELS in shared/backend-types.ts.
@@ -37,6 +37,12 @@ const CH = {
   quickOpenMain: 'vyrse:quick-open-main',
   phone: 'vyrse:phone',
   phoneStatus: 'vyrse:phone-status',
+  overlay: 'vyrse:overlay',
+  overlayShow: 'vyrse:overlay-show',
+  overlayIdle: 'vyrse:overlay-idle',
+  overlayStop: 'vyrse:overlay-stop',
+  overlayClicked: 'vyrse:overlay-clicked',
+  snap: 'vyrse:snap',
 } as const
 
 const bridge: VyrseBridge = {
@@ -105,6 +111,30 @@ const bridge: VyrseBridge = {
       ipcRenderer.on(CH.phoneStatus, listener)
       return () => ipcRenderer.removeListener(CH.phoneStatus, listener)
     },
+    overlay: message => ipcRenderer.send(CH.overlay, message),
+    onOverlayStop(callback) {
+      const listener = () => callback()
+      ipcRenderer.on(CH.overlayStop, listener)
+      return () => ipcRenderer.removeListener(CH.overlayStop, listener)
+    },
+    onOverlayClicked(callback) {
+      const listener = () => callback()
+      ipcRenderer.on(CH.overlayClicked, listener)
+      return () => ipcRenderer.removeListener(CH.overlayClicked, listener)
+    },
+    onSnap(callback) {
+      const listener = (_event: IpcRendererEvent, photo: SnapPhoto) => callback(photo)
+      ipcRenderer.on(CH.snap, listener)
+      return () => ipcRenderer.removeListener(CH.snap, listener)
+    },
+  },
+  overlayPage: {
+    onShow(callback) {
+      const listener = (_event: IpcRendererEvent, message: OverlayMessage) => callback(message)
+      ipcRenderer.on(CH.overlayShow, listener)
+      return () => ipcRenderer.removeListener(CH.overlayShow, listener)
+    },
+    idle: () => ipcRenderer.send(CH.overlayIdle),
   },
   quick: {
     ask: (id, text) => ipcRenderer.send(CH.quickAsk, { id, text }),

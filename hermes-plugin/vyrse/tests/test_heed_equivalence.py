@@ -8,9 +8,15 @@ import sys
 from pathlib import Path
 
 import numpy as np
-import torch
-from heed.audio import load_wav
-from heed.infer import WakeWordDetector
+
+if __name__ != "__main__":  # a standalone gate script; under pytest it only runs where heed + torch exist
+    import pytest
+
+    pytest.importorskip("torch")
+    pytest.importorskip("heed")
+import torch  # noqa: E402
+from heed.audio import load_wav  # noqa: E402
+from heed.infer import WakeWordDetector  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "wake"))
 from heed_numpy import HeedDetector  # noqa: E402

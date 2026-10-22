@@ -225,6 +225,20 @@ def _plain_time(schedule: str) -> str:
     return at.strftime("%Y-%m-%dT%H:%M:00")
 
 
+def _one_time(schedule: str) -> str:
+    """'once at 2026-10-23 06:45' / '2026-10-23 06:45' (what the model sends when it changes a time) -> the ISO
+    form the scheduler takes; anything else unchanged."""
+    import datetime as dt
+
+    m = re.fullmatch(r"\s*(?:once\s+)?(?:at\s+|on\s+)?(\d{4}-\d\d-\d\d)[ T](\d{1,2}:\d\d)(?::\d\d)?\s*", schedule or "", re.I)
+    if not m:
+        return schedule
+    try:
+        return dt.datetime.fromisoformat(f"{m.group(1)}T{int(m.group(2).split(':')[0]):02d}:{m.group(2).split(':')[1]}").strftime("%Y-%m-%dT%H:%M:00")
+    except ValueError:
+        return schedule
+
+
 def _alarm_card(at) -> None:
     from .workspace import build_artifact, deliver
 
@@ -252,7 +266,11 @@ def handle(params: Dict[str, Any], **kw: Any) -> str:
 
     wants_alarm = params.get("alarm") is True and (not said() or re.search(r"\balarm|\bwake\b|wake me|ring", said(), re.I))
     if args.get("action") in ("create", "update") and args.get("schedule"):
-        args["schedule"] = _plain_time(str(args["schedule"]))
+        args["schedule"] = _one_time(_plain_time(str(args["schedule"])))
+        if args["action"] == "update" and not re.search(r"\d{4}-\d\d-\d\dT", args["schedule"]):
+            at = _clock(args["schedule"])  # "make it 6:45": the next 6:45
+            if at is not None:
+                args["schedule"] = at.strftime("%Y-%m-%dT%H:%M:00")
     if args.get("action") == "create" and wants_alarm:
         alarm_at = _clock(str(args.get("schedule") or ""))
         if alarm_at is not None:

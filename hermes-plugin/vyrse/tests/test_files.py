@@ -21,3 +21,11 @@ def test_empty_dated_search_widens_to_any_time(monkeypatch):
     assert out["results"][0]["name"] == "Survey.pdf" and "any time" in out["note"]
     assert calls[0] == {"action": "find", "kind": "pdf", "modified": "week"}  # empty values aren't passed on
     assert "modified" not in calls[1]
+
+
+def test_finding_a_file_ranks_what_a_person_means():
+    from vyrse.files.index import _rank
+
+    words = ["cv"]
+    assert _rank("ibm-plex-mono-CvHOgSBP.woff", "woff", 0, words) == 0  # noise: dropped
+    assert _rank("My CV 2026.pdf", "pdf", 0, words) > _rank("cvnotes.txt", "txt", 0, words) > 0

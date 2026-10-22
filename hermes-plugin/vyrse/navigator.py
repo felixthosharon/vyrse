@@ -9,6 +9,7 @@ changing), then looks again; do clicks it itself. A walkthrough keeps going unti
 """
 from __future__ import annotations
 
+import contextvars
 import json
 import logging
 import os
@@ -208,13 +209,28 @@ def caption_for(label: str, why: str) -> str:
     return f"{head}: {why[0].lower()}{why[1:]}"[:110] if why and label.lower() not in why.lower()[:len(label) + 12] else head
 
 
+_current: List[Dict[str, Any]] = []  # the ring on screen now, so "I didn't see it" can show it again
+
+
 def _ring(item: Dict[str, Any], label: str, caption: str, step: int) -> None:
     from . import chrome, point
 
     chrome.ring_clicked.clear()
     point.ring_clicked.clear()
-    point.overlay({"kind": "point", "op": "show", "rect": item["rect"], "label": label[:80], "caption": caption[:140],
-                   "step": f"Step {step}", "hold": True})
+    message = {"kind": "point", "op": "show", "rect": item["rect"], "label": label[:80], "caption": caption[:140],
+               "step": f"Step {step}", "hold": True}
+    _current[:] = [message]
+    point.overlay(message)
+
+
+def reshow() -> bool:
+    """Draw the current step's ring again (they didn't see it). False when no walkthrough is on screen."""
+    from . import point
+
+    if not active.is_set() or not _current:
+        return False
+    point.overlay(dict(_current[0]))
+    return True
 
 
 def _clear() -> None:
@@ -274,6 +290,7 @@ def _wait_for_user(window: str, me: int) -> bool:
     before = _signature(window)
     end = time.monotonic() + STEP_WAIT
     checked = time.monotonic()
+    seen = 0
     while time.monotonic() < end:
         if _halted(me):
             return False
@@ -281,11 +298,28 @@ def _wait_for_user(window: str, me: int) -> bool:
             return True
         if time.monotonic() - checked > 1.5:
             checked = time.monotonic()
-            now = _signature(window)
-            if before and now and now != before:
+            # their click opened something, seen twice in a row (one look can catch a page mid-update)
+            seen = seen + 1 if moved_on(before, _signature(window)) else 0
+            if seen >= 2:
                 return True
         time.sleep(0.25)
     return False
+
+
+def moved_on(before: str, now: str) -> bool:
+    """Did the window really change (a new page or title, a menu or dialog opening), not just flicker? The
+    signature is "title|pop-ups|controls"; pages update themselves all the time ("Saving…", a tooltip, a
+    cursor), which moves the control count by a few, so only a big jump counts."""
+    if not before or not now or before == now:
+        return False
+    b, n = before.rsplit("|", 2), now.rsplit("|", 2)
+    if len(b) != 3 or len(n) != 3 or b[0] != n[0] or b[1] != n[1]:
+        return True
+    try:
+        c0, c1 = int(b[2]), int(n[2])
+    except ValueError:
+        return True
+    return abs(c1 - c0) >= max(12, 0.08 * c0)
 
 
 def _tell(text: str) -> None:
@@ -346,8 +380,10 @@ def start(goal: str, mode: str, ctx: Dict[str, Any], private: bool) -> Dict[str,
     first["history"] = history
     if first.get("stop"):
         return {"ok": False, "on_screen": describe(ctx), **first["stop"]}
-    threading.Thread(target=_walk, args=(goal, "guide", ctx, window, hints, me, first), daemon=True,
-                     name="vyrse-guide").start()
+    # Run it in this turn's context: the overlay rings are routed to the VYRSE window through it (a bare
+    # thread has no session, so every ring went nowhere and the user saw nothing).
+    threading.Thread(target=contextvars.copy_context().run, args=(_walk, goal, "guide", ctx, window, hints, me, first),
+                     daemon=True, name="vyrse-guide").start()
     return {"ok": True, "on_screen": describe(ctx), "first": first.get("label"), "why": first.get("why"),
             "source": hints.get("source"),
             "note": "Step 1 is ringed on screen. VYRSE looks again after each click and rings the next one until "

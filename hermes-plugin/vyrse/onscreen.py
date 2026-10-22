@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import logging
 import os
+import contextvars
 import re
 import threading
 import time
@@ -317,7 +318,7 @@ def guide_fixed_steps(goal: str, app: str = "") -> Dict[str, Any]:
         me = _walk_id
     _next.clear()
     surface.ring(first, steps[0]["caption"] or steps[0]["target"], f"Step 1 / {len(steps)}")
-    threading.Thread(target=_walk, args=(surface, steps, me), daemon=True, name="vyrse-guide").start()
+    threading.Thread(target=contextvars.copy_context().run, args=(_walk, surface, steps, me), daemon=True, name="vyrse-guide").start()
     return {"ok": True, "on_screen": describe(ctx), "steps": [s["target"] for s in steps if not _just_info(s)],
             "after": [s["caption"] or s["target"] for s in steps if _just_info(s)], "source": plan.get("source"),
             "note": "Step 1 is ringed on screen; clicking it brings the next (or they can say 'next'). Reply in "
@@ -469,12 +470,14 @@ def do_fixed_steps(goal: str, app: str = "") -> Dict[str, Any]:
 _ONSCREEN = re.compile(
     r"\b(highlight|mark|point (?:at|to|out)|show me (?:where|how)|where (?:do|should|can|to) i (?:click|find|go)|"
     r"where(?:'s| is) the|how (?:do|can) i\b.*\b(?:in|on) (?:this|here|it|chrome|word|excel)|walk me through|"
-    r"guide me|do it (?:for me|on (?:your|ur) own|urself|yourself)|on (?:my|the) screen|controlling my screen|"
+    r"guide me|do it (?:for me|on (?:your|ur) own|urself|yourself)|(?:show|point|click|find) (?:\w+ )?on (?:my|the) screen|controlling my screen|"
     r"(?:export|save|download|convert) (?:this|it)\b)", re.I)
 _DO = re.compile(r"\b(do it|do that|for me|on (?:your|ur) own|yourself|urself|right away|controlling|click it|"
                  r"just (?:do|export|save|download))\b", re.I)
 
 
+_AGAIN = re.compile(r"\b(?:didn'?t|did not|can'?t|cannot|don'?t|do not) see\b|not (?:showing|visible|there)|"
+                    r"show (?:it|me|that) again|where (?:is it|'?s it)|highlight it|i want (?:you|u) to highlight", re.I)
 _NEXT_SAID = re.compile(r"\b(next|step \d|done|clicked|didn'?t (?:work|show|come)|nothing (?:happened|came)|now what|then what|what now)\b", re.I)
 
 
@@ -492,6 +495,9 @@ def pre_llm_call(platform: str = "", user_message: Any = "", **_: Any) -> Option
         return None
     from . import navigator
 
+    if navigator.active.is_set() and _AGAIN.search(text):
+        return {"context": "[A walkthrough is on screen and they can't see the ring: call vyrse_point action=again "
+                           "(it draws the current step again). Don't start a new guide.]"}
     if (_active.is_set() or navigator.active.is_set()) and _NEXT_SAID.search(text):
         return {"context": "[A walkthrough is on screen. They want the next step: call vyrse_point action=next.]"}
     mode = wants_onscreen(text)

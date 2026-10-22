@@ -35,7 +35,7 @@ SCHEMA: Dict[str, Any] = {
     "parameters": {
         "type": "object",
         "properties": {
-            "action": {"type": "string", "enum": ["guide", "do", "show", "next", "clear"]},
+            "action": {"type": "string", "enum": ["guide", "do", "show", "next", "again", "clear"]},
             "goal": {"type": "string", "description": "guide/do: what they want to do, e.g. 'export as PDF'."},
             "target": {"type": "string", "description": "show: the control's label, or what it looks like."},
             "caption": {"type": "string", "description": "show: what to do with it, a few words."},
@@ -174,6 +174,12 @@ def handle(params: Dict[str, Any], **_: Any) -> str:
         except Exception:
             pass
         return json.dumps({"ok": True})
+    if action == "again":
+        from .. import navigator
+
+        if navigator.reshow():
+            return json.dumps({"ok": True, "note": "The current step is ringed again on screen. Say where it is in a few words."})
+        return json.dumps({"ok": False, "error": "No walkthrough is on screen. Start one with action=guide and the goal."})
     if action == "next":
         from .. import onscreen
 

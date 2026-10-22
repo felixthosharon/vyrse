@@ -34,6 +34,15 @@ export function runSmoke(mode: string, backend: HermesBackend, quit: (exitCode: 
       return
     }
 
+    if (mode === 'battery') {
+      runBattery(conn, process.env.VYRSE_SMOKE_PROMPTS ?? '', process.env.VYRSE_SMOKE_OUT ?? path.join(process.cwd(), 'battery.jsonl'))
+        .then(() => quit(0))
+        .catch(err => {
+          console.log(`[smoke] battery failed: ${(err as Error).message}`)
+          quit(1)
+        })
+      return
+    }
     if (mode === 'probe') {
       probeTurn(conn)
         .then(() => quit(0))
@@ -303,4 +312,88 @@ export function runScript(win: BrowserWindow, backend: HermesBackend, steps: Ste
       }
     })()
   })
+}
+
+/**
+ * Battery mode (VYRSE_SMOKE=battery): VYRSE_SMOKE_PROMPTS is a JSON file of conversations, each an array of user
+ * messages sent in order in one fresh "vyrse" session. Every turn's tool calls, results, reply and time go to
+ * VYRSE_SMOKE_OUT as JSON lines. Each session is deleted afterwards, so testing leaves no history behind.
+ */
+async function runBattery(conn: BackendConnection, promptsFile: string, outFile: string): Promise<void> {
+  const conversations = JSON.parse(fs.readFileSync(promptsFile, 'utf8')) as string[][]
+  const socket = new WebSocket(`${conn.wsUrl}?token=${encodeURIComponent(conn.token)}`)
+  const pending = new Map<string, (msg: any) => void>()
+  let nextId = 0
+  let onEvent: (type: string, payload: any) => void = () => {}
+  socket.addEventListener('message', ev => {
+    for (const line of String(ev.data).split('\n')) {
+      if (!line.trim()) continue
+      const msg = JSON.parse(line)
+      if (msg.id !== undefined && pending.has(String(msg.id))) {
+        pending.get(String(msg.id))!(msg)
+        pending.delete(String(msg.id))
+      } else if (msg.method === 'event') onEvent(msg.params?.type as string, msg.params?.payload)
+      else if (msg.id !== undefined && msg.method) {
+        // approvals / confirm questions: record and decline (a test must never approve anything)
+        onEvent('server.request', { method: msg.method, params: msg.params })
+        socket.send(JSON.stringify({ jsonrpc: '2.0', id: msg.id, error: { code: -32601, message: 'declined by battery' } }))
+      }
+    }
+  })
+  await new Promise<void>((resolve, reject) => {
+    socket.addEventListener('open', () => resolve())
+    socket.addEventListener('error', () => reject(new Error('socket error')))
+  })
+  const call = (method: string, params: object) =>
+    new Promise<any>((resolve, reject) => {
+      const id = `b${++nextId}`
+      pending.set(id, msg => (msg.error ? reject(new Error(`${method}: ${JSON.stringify(msg.error)}`)) : resolve(msg.result)))
+      socket.send(JSON.stringify({ jsonrpc: '2.0', id, method, params }))
+    })
+  fs.writeFileSync(outFile, '')
+  for (const [ci, turns] of conversations.entries()) {
+    const created = await call('session.create', { source: 'vyrse', close_on_disconnect: true })
+    const sid = created.session_id as string
+    for (const user of turns) {
+      const started = Date.now()
+      const tools: { name: string; args: string; result?: string; s?: number }[] = []
+      const requests: string[] = []
+      let text = ''
+      const done = new Promise<any>(resolve => {
+        const timer = setTimeout(() => resolve({ status: 'timeout' }), 240_000)
+        onEvent = (type, payload) => {
+          if (type === 'message.delta') text += payload?.text ?? ''
+          if (type === 'tool.start') tools.push({ name: payload?.name, args: JSON.stringify(payload?.args ?? payload?.arguments ?? payload?.input ?? '').slice(0, 400) })
+          if (type === 'tool.complete') {
+            const t = [...tools].reverse().find(x => x.name === payload?.name && x.result === undefined)
+            if (t) { t.result = JSON.stringify(payload?.result ?? payload?.output ?? '').slice(0, 600); t.s = payload?.duration_s }
+          }
+          if (type === 'server.request') requests.push(String(payload?.method))
+          if (type === 'message.complete') { clearTimeout(timer); resolve(payload) }
+        }
+      })
+      await call('prompt.submit', { session_id: sid, text: user })
+      const complete = await done
+      const row = { conv: ci, user, ms: Date.now() - started, status: complete?.status, reply: String(complete?.text ?? text).slice(0, 1200), tools, requests }
+      fs.appendFileSync(outFile, JSON.stringify(row) + '\n')
+      console.log(`[smoke] ${ci} ${JSON.stringify(user).slice(0, 60)} -> ${tools.map(t => t.name).join(',') || '-'} (${row.ms} ms)`)
+    }
+    // close the live session first (an open one can't be deleted), then delete the STORED one
+    const stored = (created.stored_session_id as string) || sid
+    // Hermes can write the row again after this (titles are made in the background), so the stored id is
+    // recorded too: scripts/dev/battery_cleanup deletes them with the CLI once the run has ended.
+    fs.appendFileSync(outFile, JSON.stringify({ stored }) + '\n')
+    try {
+      await call('session.close', { session_id: sid })
+    } catch {
+      /* already gone */
+    }
+    try {
+      await call('session.delete', { session_id: stored })
+    } catch (err) {
+      console.log(`[smoke] couldn't delete ${stored}: ${(err as Error).message}`)
+      fs.appendFileSync(outFile, JSON.stringify({ undeleted: stored }) + '\n')
+    }
+  }
+  socket.close()
 }

@@ -89,6 +89,20 @@ else {
   Did "installed (numpy/onnxruntime come from the Hermes venv)"
 }
 
+# Web search: Hermes' free search backend (ddgs) is an optional extra. Without it web_search is silently missing
+# and VYRSE answers prices and news from memory. It goes into the environment Hermes actually runs in (a managed
+# one that Hermes swaps on updates; this asks Hermes which), so re-running setup after an update puts it back.
+Write-Host "Web search"
+$RunEnv = & $Py -c "import sys, os; sys.path.insert(0, r'$Agent'); os.chdir(r'$Agent'); import hermes_bootstrap; print(os.path.dirname(os.path.dirname(next(p for p in sys.path if p.endswith('site-packages')))))" 2>$null | Select-Object -Last 1
+if (-not $RunEnv -or -not (Test-Path (Join-Path $RunEnv 'pyvenv.cfg'))) { $RunEnv = Split-Path (Split-Path $Py) }
+& $Py -c "import sys, os; sys.path.insert(0, r'$Agent'); os.chdir(r'$Agent'); import hermes_bootstrap; import ddgs" 2>$null
+if ($LASTEXITCODE -eq 0) { Ok "ddgs (web_search)" }
+elseif ($Check) { Todo "web search backend missing (ddgs)" }
+else {
+  & $Uv pip install --python $RunEnv ddgs==9.16.0 | Out-Null  # the version Hermes pins for this extra
+  Did "installed ddgs into $RunEnv"
+}
+
 # 5. Models -------------------------------------------------------------------------------
 Write-Host "Voice models ($VyrseDir\models)"
 $Models = Join-Path $VyrseDir 'models'
@@ -207,6 +221,34 @@ foreach ($s in $settings) {
   & $Hermes config set $key $value --force | Out-Null
   Did "$key = $value"
 }
+
+# VYRSE's own toolsets must not be globally switched off (agent.disabled_toolsets overrides platform_toolsets):
+# with "web" in there, web_search silently vanished and VYRSE answered prices and news from memory. Only these
+# are taken out of the list; everything else the user disabled stays disabled.
+$NeedOn = @('web', 'search', 'browser', 'file', 'memory', 'skills', 'terminal', 'vision', 'vyrse_ui')
+$current = ((& $Hermes config get agent.disabled_toolsets 2>$null) -join "`n")
+$off = @([regex]::Matches($current, '[A-Za-z0-9_\-]+') | ForEach-Object { $_.Value } | Where-Object { $_ -notmatch '^(not|set|unknown|None|null)$' })
+$blocked = @($NeedOn | Where-Object { $off -contains $_ })
+if (-not $blocked.Count) { Ok "agent.disabled_toolsets (VYRSE's toolsets on)" }
+elseif ($Check) { Todo "turned off globally, VYRSE needs them: $($blocked -join ', ')" }
+else {
+  $keep = @($off | Where-Object { $NeedOn -notcontains $_ })
+  & $Hermes config set agent.disabled_toolsets ('[' + (($keep | ForEach-Object { '"' + $_ + '"' }) -join ',') + ']') --force | Out-Null
+  Did "turned back on: $($blocked -join ', ')"
+}
+
+# The desktop gateway gives every session (VYRSE's too) the "cli" platform's toolsets, not platform_toolsets.vyrse,
+# so web search has to be on there.
+$cliTools = ((& $Hermes config get platform_toolsets.cli 2>$null) -join "`n")
+if ($cliTools -match '(?m)\bweb\b') { Ok "platform_toolsets.cli has web" }
+elseif ($Check) { Todo "web search is off for VYRSE sessions (platform_toolsets.cli)" }
+else { & $Hermes tools enable web | Out-Null; Did "web search on for VYRSE sessions" }
+# Reading a page (web_extract) needs a backend that works without an API key: keenable's free tier. "native" is
+# OpenAI's and fails without a key, which made every page read fail and the model fall back on memory.
+$extract = ((& $Hermes config get web.extract_backend 2>$null) -join '').Trim()
+if ($extract -and $extract -notmatch 'not set|None|native') { Ok "web.extract_backend ($extract)" }
+elseif ($Check) { Todo "web.extract_backend should be keenable (now: $(if ($extract) { $extract } else { 'unset' }))" }
+else { & $Hermes config set web.extract_backend keenable --force | Out-Null; Did "web.extract_backend = keenable" }
 
 # Every VYRSE tool must load up front ("eager"): with tool search on, anything else hides behind a search step
 # that local models almost never take, so a new VYRSE tool would silently never be used. Merged into whatever

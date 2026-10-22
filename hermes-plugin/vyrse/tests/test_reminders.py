@@ -60,3 +60,11 @@ def test_briefing_news_skips_shopping_and_repeats(monkeypatch):
     titles = [h["title"] for h in briefing.headlines()]
     assert titles == ["OpenAI announces 722 mathematical discoveries", "Anthropic ships a new model",
                       "Google rolls out SynthID detector globally", "Valorant patch 11.08 nerfs Vandal spray"]
+
+
+def test_changing_an_alarm_time_uses_a_time_the_scheduler_takes():
+    from vyrse.reminders import _one_time
+
+    assert _one_time("once at 2026-10-23 06:45") == "2026-10-23T06:45:00"
+    assert _one_time("2026-10-23 6:45") == "2026-10-23T06:45:00"
+    assert _one_time("every day at 9pm") == "every day at 9pm"

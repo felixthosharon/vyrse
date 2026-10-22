@@ -213,6 +213,17 @@ def ready() -> bool:
     return p.exists() and p.stat().st_size > 50_000
 
 
+_PERSONAL = set().union(*(KINDS[k] for k in ("document", "image", "video", "audio", "archive")))
+
+
+def _rank(name: str, ext: str, is_dir: int, words: List[str]) -> float:
+    """What a person most likely means (the newest-first order breaks ties): whole words over a prefix buried in
+    a hash ("cv" vs "CvHOgSBP.woff"), and their own documents, photos and media over fonts and app files."""
+    tokens = set(re.split(r"[^\w]+", name.lower()))
+    whole = sum(w in tokens for w in words)
+    return whole * 2 + (1.5 if (ext or "").lower() in _PERSONAL else 0) + (0.5 if is_dir else 0)
+
+
 def find(query: str = "", kind: Optional[str] = None, modified: Optional[str] = None, within: Optional[str] = None, limit: int = 15) -> Dict[str, Any]:
     """Name search over the index: every word must match the start of a word in the name; newest first."""
     words = [w for w in re.split(r"[^\w]+", (query or "").lower()) if w][:6]
@@ -243,8 +254,12 @@ def find(query: str = "", kind: Optional[str] = None, modified: Optional[str] = 
         return {"ok": False, "error": "Say what to look for (words from the name, a kind, or how recent)."}
     limit = max(1, min(40, int(limit or 15)))
     rows = db.execute(f"select f.path, f.name, f.size, f.mtime, f.is_dir, f.ext from files f where {' and '.join(where)} "
-                      f"order by f.mtime desc limit ?", args + [limit]).fetchall()
+                      f"order by f.mtime desc limit ?", args + [limit * 8]).fetchall()
     db.close()
+    ranked = [(r, _rank(r[1], r[5], r[4], words)) for r in rows]
+    if words:  # "find my cv": a font named …CvHOgSBP.woff is noise, not an answer
+        ranked = [x for x in ranked if x[1] > 0]
+    rows = [r for r, _ in sorted(ranked, key=lambda x: -x[1])][:limit]
     results = [{"name": n, "path": p, "kind": "folder" if d else (next((k for k in ("pdf", "image", "video", "audio", "code", "archive", "document") if e in KINDS[k]), "file")),
                 "size_kb": None if d else round(s / 1024), "modified": time.strftime("%Y-%m-%d %H:%M", time.localtime(m))}
                for p, n, s, m, d, e in rows]

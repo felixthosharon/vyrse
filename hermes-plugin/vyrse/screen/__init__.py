@@ -6,6 +6,7 @@ no image leaves the PC. The last capture is kept at %HERMES_HOME%/vyrse/screen/l
 from __future__ import annotations
 
 import json
+import os
 import re
 import subprocess
 from pathlib import Path
@@ -21,13 +22,15 @@ SCHEMA: Dict[str, Any] = {
         "looking at (the one behind VYRSE) and all text visible in it. Use it for 'what's on my screen', "
         "'read this', 'summarise this page/email/error', 'what does this say'. target=screen reads every "
         "monitor instead of one window. image=<path> reads the text in an image file instead (e.g. a "
-        "screenshot or photo the user attached). To click or type, use computer_use instead."
+        "screenshot or photo the user attached). save=true also keeps the picture: 'take a screenshot' = target=screen, "
+        "save=true (saved to Pictures/Screenshots; say where). To click or type, use computer_use instead."
     ),
     "parameters": {
         "type": "object",
         "properties": {
             "target": {"type": "string", "enum": ["window", "screen"], "description": "Default window."},
             "image": {"type": "string", "description": "Optional: path of an image file to read instead of the screen."},
+            "save": {"type": "boolean", "description": "Keep a copy as a screenshot file (Pictures/Screenshots)."},
         },
     },
 }
@@ -117,11 +120,29 @@ def read_image(path: str) -> Dict[str, Any]:
     return out
 
 
+def save_copy(image: Path) -> str:
+    """A kept copy of the capture, where Windows keeps screenshots."""
+    import shutil
+    import time
+
+    home = Path(os.environ.get("USERPROFILE") or Path.home())
+    pictures = next((p for p in (home / "OneDrive" / "Pictures", home / "Pictures") if p.is_dir()), home / "Pictures")
+    folder = pictures / "Screenshots"
+    folder.mkdir(parents=True, exist_ok=True)
+    target = folder / f"VYRSE {time.strftime('%Y-%m-%d %H%M%S')}.png"
+    shutil.copy(image, target)
+    return str(target)
+
+
 def handle(params: Dict[str, Any], **_: Any) -> str:
     target = params.get("target") if params.get("target") in ("window", "screen") else "window"
     try:
         if params.get("image"):
             return json.dumps({"success": True, **read_image(str(params["image"]))}, ensure_ascii=False)
-        return json.dumps({"success": True, **read_screen(target)}, ensure_ascii=False)
+        out = read_screen(target)
+        if params.get("save"):
+            out["saved"] = save_copy(Path(out["image"]))
+            out["note"] = f"Screenshot saved to {out['saved']}. Say where, in a few words."
+        return json.dumps({"success": True, **out}, ensure_ascii=False)
     except Exception as exc:
         return json.dumps({"success": False, "error": f"Could not read the screen: {exc}"})

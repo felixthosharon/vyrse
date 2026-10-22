@@ -445,3 +445,161 @@ def test_desktop_never_closes_parts_of_windows_itself(monkeypatch):
     for name in ("Program Manager", "NVIDIA GeForce Overlay", "Rainmeter", "taskbar"):
         out = json.loads(desktop.handle({"action": "close", "window": name}))
         assert out["ok"] is False
+
+
+def test_guide_rings_reach_the_window_that_asked(monkeypatch):
+    """The walkthrough runs on its own thread; its rings must still be routed to the user's VYRSE window
+    (a bare thread had no session, so every ring went nowhere and the user saw nothing)."""
+    import contextvars
+    import time as _time
+
+    from gateway.session_context import set_session_vars
+    from tools import desktop_ui
+    from vyrse import navigator
+
+    sent = []
+    monkeypatch.setattr(desktop_ui, "_emit", lambda sid, event, payload: sent.append((sid, payload.get("op"))))
+    monkeypatch.setattr(navigator, "_step", lambda *a, **k: {"label": "File", "item": {"rect": {"x": 1, "y": 2, "width": 30, "height": 20}}})
+    monkeypatch.setattr(navigator, "_wait_for_user", lambda window, me: False)
+
+    def turn():
+        set_session_vars(platform="vyrse", ui_session_id="ui-felix", session_id="s1")
+        return navigator.start("export as pdf", "guide", {"window": "Word"}, private=True)
+
+    out = contextvars.copy_context().run(turn)
+    assert out["ok"] and out["first"] == "File"
+    deadline = _time.time() + 5
+    while not any(op == "show" for _, op in sent) and _time.time() < deadline:
+        _time.sleep(0.05)
+    assert ("ui-felix", "show") in sent
+
+
+def test_a_page_updating_itself_is_not_the_user_clicking():
+    from vyrse.navigator import moved_on
+
+    assert not moved_on("Doc - Word|0|412", "Doc - Word|0|415")  # "Saving…" appeared
+    assert moved_on("Doc - Word|0|412", "Doc - Word|1|415")  # a menu popped up
+    assert moved_on("Doc - Word|0|412", "Doc - Word|0|520")  # the File pane opened
+    assert moved_on("Doc - Word|0|412", "Export - Word|0|412")  # a new page
+
+
+def test_i_didnt_see_it_shows_the_ring_again(monkeypatch):
+    from vyrse import navigator, onscreen, point
+
+    drawn = []
+    monkeypatch.setattr(point, "overlay", lambda m: drawn.append(m) or True)
+    navigator.active.set()
+    try:
+        navigator._ring({"rect": {"x": 1, "y": 2, "width": 3, "height": 4}}, "File", "Click File", 1)
+        for said in ("i didnt see them", "no, i want u to highlight it", "where is it", "it's not showing"):
+            ctx = onscreen.pre_llm_call(platform="vyrse", user_message=said)
+            assert ctx and "action=again" in ctx["context"], said
+        assert navigator.reshow() and drawn[-1]["label"] == "File" and len(drawn) == 2
+    finally:
+        navigator.active.clear()
+    assert not navigator.reshow()
+
+
+def test_a_turn_ending_in_thinking_still_gets_a_real_reply():
+    """Qwen often stops after a tool with only its reasoning; that became an empty bubble."""
+    from vyrse import fallback
+
+    fallback.pre_llm_call(session_id="s")
+    fallback.post_tool_call("vyrse_desktop", json.dumps({"ok": True, "arranged": ["chrome: left", "explorer: top-right"]}), "s")
+    out = fallback.transform_llm_output("The user wants me to tidy again. I'll call tidy and then confirm.", "s", "vyrse")
+    assert out == "Tidied: chrome left, explorer top-right."
+    fallback.post_tool_call("vyrse_point", json.dumps({"ok": True, "first": "File"}), "s")
+    assert "File" in fallback.transform_llm_output("", "s", "vyrse") if fallback.transform_llm_output is not None else True
+    fallback.post_tool_call("vyrse_desktop", json.dumps({"ok": True, "arranged": ["chrome: left"]}), "s")
+    assert fallback.transform_llm_output("Chrome is on the left now.", "s", "vyrse") is None  # a real answer stays
+
+
+def test_test_runs_never_touch_the_pc(monkeypatch):
+    from vyrse import testdry
+
+    assert testdry.pre_tool_call("vyrse_desktop", {"action": "tidy"}) is None  # off unless asked
+    monkeypatch.setenv("VYRSE_TEST_DRY", "1")
+    for tool, args in (("vyrse_desktop", {"action": "tidy"}), ("vyrse_controls", {"action": "volume", "level": 0}),
+                       ("vyrse_chrome", {"action": "open", "url": "https://x"}), ("memory", {"action": "add"}),
+                       ("vyrse_phone", {"action": "ring"}), ("browser_navigate", {"url": "https://x"})):
+        out = testdry.pre_tool_call(tool, args)
+        assert out and out["action"] == "block" and json.loads(out["message"])["dry_run"], tool
+    for tool, args in (("vyrse_desktop", {"action": "windows"}), ("vyrse_screen", {}), ("vyrse_system", {"action": "overview"}),
+                       ("vyrse_chrome", {"action": "tabs"}), ("vyrse_digest", {"path": "x.pdf"})):
+        assert testdry.pre_tool_call(tool, args) is None, tool
+
+
+def test_translating_typed_words_is_not_live_captions():
+    from vyrse.captions import typed_text_to_translate
+
+    for typed in ("translate 'where is the train station' to Spanish", 'translate "good morning" into French',
+                  "translate good morning to french", "can you translate i love you into malayalam"):
+        assert typed_text_to_translate(typed), typed
+    for live in ("translate this to english", "translate this video", "translate what she's saying to english",
+                 "transalte plz", "turn on captions in spanish", "translate it into english"):
+        assert not typed_text_to_translate(live), live
+
+
+def test_everyday_requests_get_pointed_at_the_right_tool():
+    from vyrse.router import hint_for, pre_llm_call
+
+    cases = {
+        "pause it": "vyrse_controls", "turn the volume down a bit": "vyrse_controls", "next song": "vyrse_controls",
+        "louder": "vyrse_controls", "play": "vyrse_controls",
+        "find my resume": "vyrse_files", "where's the essay i wrote last week": "vyrse_files",
+        "open my chemistry notes": "vyrse_files",
+        "search the web for the price of the latest iPhone": "web_search", "who won the match yesterday": "web_search",
+        "take a screenshot": "save=true", "write an email to my teacher saying I'll be late": "mail.google.com",
+        "what was I doing yesterday afternoon?": "rewind",
+    }
+    for said, tool in cases.items():
+        assert tool in (hint_for(said) or ""), said
+    for said in ("hi", "tell me a joke", "explain quantum computing simply", "what's 15% of 240?", "play a game with me"):
+        assert hint_for(said) is None, said
+    ctx = pre_llm_call(platform="vyrse", user_message="what time is it")
+    assert ctx and ctx["context"].startswith("[Now: ")
+
+
+def test_quick_media_and_volume_commands_are_done_by_vyrse(monkeypatch):
+    from vyrse import router
+
+    assert router.quick_command("pause it")[0] == {"action": "media", "command": "play_pause"}
+    assert router.quick_command("next song")[0]["command"] == "next"
+    assert router.quick_command("turn the volume down a bit")[0] == {"action": "volume", "command": "down", "level": 10}
+    assert router.quick_command("volume 30")[0] == {"action": "volume", "command": "set", "level": 30}
+    assert router.quick_command("play a game with me") is None and router.quick_command("pause my focus session") is None
+    monkeypatch.setenv("VYRSE_TEST_DRY", "1")
+    ctx = router.pre_llm_call(platform="vyrse", user_message="mute", session_id="q")
+    assert "already done" in ctx["context"]
+    assert router.pre_tool_call("vyrse_controls", {"action": "volume", "command": "mute"}, session_id="q")["action"] == "block"
+    assert router.transform_llm_output("I've muted it.", "q", "vyrse") == "Muted."
+    router.pre_llm_call(platform="vyrse", user_message="what's the weather", session_id="q")
+    assert router.pre_tool_call("vyrse_controls", {"action": "volume"}, session_id="q") is None
+
+
+def test_reading_the_screen_is_not_an_on_screen_walkthrough():
+    from vyrse.onscreen import wants_onscreen
+
+    for said in ("summarise what's on my screen", "what's on my screen right now?", "read what's on the screen"):
+        assert wants_onscreen(said) is None, said
+    for said in ("highlight where to click to export this as pdf", "show me where the settings are",
+                 "do it for me", "show it on my screen"):
+        assert wants_onscreen(said), said
+
+
+def test_round_two_everyday_fixes(monkeypatch):
+    import json as _json
+
+    from vyrse import router
+    from vyrse.controls import _MEDIA_ALIASES
+
+    assert "vyrse_notes action=record" in router.hint_for("record this lecture")
+    assert "weather_only" in router.hint_for("what's the weather going to be like tomorrow?")
+    assert _MEDIA_ALIASES["play"] == "play_pause"
+    assert router._STOP.match("stop") and not router._STOP.match("cancel") and not router._STOP.match("stop the alarm")
+    monkeypatch.setenv("VYRSE_TEST_DRY", "1")
+    ctx = router.pre_llm_call(platform="vyrse", user_message="stop", session_id="s2")
+    assert "stop" in ctx["context"].lower() and router.transform_llm_output("", "s2", "vyrse") == "Stopped."
+    from vyrse import fallback
+
+    assert fallback.line_for("vyrse_screen", _json.dumps({"success": True, "saved": "C:/Pics/VYRSE 1.png"})) == "Screenshot saved to C:/Pics/VYRSE 1.png."

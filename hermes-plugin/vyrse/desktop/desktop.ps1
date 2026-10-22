@@ -21,6 +21,9 @@ public static class VyrseUser32 {
   [DllImport("user32.dll")] public static extern bool SetCursorPos(int x, int y);
   [DllImport("user32.dll")] public static extern void mouse_event(uint flags, int dx, int dy, uint data, IntPtr extra);
   [DllImport("user32.dll")] public static extern bool SetProcessDPIAware();
+  [DllImport("user32.dll")] public static extern IntPtr GetTopWindow(IntPtr h);
+  [DllImport("user32.dll")] public static extern IntPtr GetWindow(IntPtr h, uint cmd);
+  [DllImport("dwmapi.dll")] public static extern int DwmGetWindowAttribute(IntPtr h, int attr, out int v, int size);
   [StructLayout(LayoutKind.Sequential)] public struct RECT { public int Left, Top, Right, Bottom; }
 }
 "@
@@ -48,7 +51,15 @@ function Get-AppWindows {
       $list += [pscustomobject]@{ el = $w; title = $c.Name; app = $proc; pid = $c.ProcessId; hwnd = $c.NativeWindowHandle }
     } catch {}
   }
-  $list
+  # front to back, as they're stacked on screen (UI Automation's order isn't the z-order), minus cloaked ones
+  # (on another virtual desktop, or a suspended app that only looks open)
+  $rank = @{}
+  $h = [VyrseUser32]::GetTopWindow([IntPtr]::Zero); $i = 0
+  while ($h -ne [IntPtr]::Zero -and $i -lt 5000) { $rank[[int64]$h] = $i; $i++; $h = [VyrseUser32]::GetWindow($h, 2) }
+  @($list | Where-Object {
+      $cloaked = 0
+      -not ([VyrseUser32]::DwmGetWindowAttribute([IntPtr]$_.hwnd, 14, [ref]$cloaked, 4) -eq 0 -and $cloaked -ne 0)
+    } | Sort-Object { if ($rank.ContainsKey([int64]$_.hwnd)) { $rank[[int64]$_.hwnd] } else { 99999 } })
 }
 
 function Find-Window([string]$query) {

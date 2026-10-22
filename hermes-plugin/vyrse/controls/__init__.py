@@ -53,7 +53,13 @@ def run(request: Dict[str, Any], timeout: int = 20) -> Dict[str, Any]:
     return {"ok": False, "error": f"controls helper failed: {detail[0] if detail else 'unknown error'}"}
 
 
+_MEDIA_ALIASES = {"play": "play_pause", "pause": "play_pause", "resume": "play_pause", "toggle": "play_pause",
+                  "skip": "next", "prev": "previous", "back": "previous"}
+
+
 def handle(params: Dict[str, Any], **_: Any) -> str:
+    if params.get("action") == "media" and str(params.get("command") or "").lower() in _MEDIA_ALIASES:
+        params = {**params, "command": _MEDIA_ALIASES[str(params["command"]).lower()]}
     if params.get("action") in ("clipboard_history", "clipboard_forget"):
         from .. import clipboard_memory
 

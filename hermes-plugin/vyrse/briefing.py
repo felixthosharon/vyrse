@@ -52,6 +52,10 @@ def weather(location: str = "") -> Optional[Dict[str, Any]]:
         "high_c": today.get("maxtempC"),
         "low_c": today.get("mintempC"),
         "max_chance_of_rain": rain,
+        "next_days": [{"date": d.get("date"), "high_c": d.get("maxtempC"), "low_c": d.get("mintempC"),
+                       "sky": ((d.get("hourly") or [{}] * 5)[min(4, len(d.get("hourly") or []) - 1)].get("weatherDesc") or [{}])[0].get("value", "").strip(),
+                       "max_chance_of_rain": max((int(h.get("chanceofrain", 0) or 0) for h in d.get("hourly", [])), default=0)}
+                      for d in (data.get("weather") or [])[1:3]],
     }
 
 
@@ -238,6 +242,12 @@ def cards(data: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def handle(params: Dict[str, Any], **_: Any) -> str:
+    if params.get("weather_only"):
+        try:
+            w = weather(str(params.get("location") or ""))
+        except Exception as exc:
+            return json.dumps({"ok": False, "error": f"Couldn't get the weather: {exc}"})
+        return json.dumps({"ok": True, "weather": w, "note": "next_days[0] is tomorrow. Say it in a sentence or two."}, ensure_ascii=False)
     data = gather(str(params.get("location") or ""), str(params.get("news_topic") or ""))
     try:
         from .tools import _in_vyrse_session

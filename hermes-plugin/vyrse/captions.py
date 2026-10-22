@@ -238,6 +238,20 @@ _WANTS_OFF = re.compile(r"\b(stop|close|turn off|hide|remove|disable|no more|get
                         r"|(caption|subtit|\bcc\b)\w*\s+(off|away)", re.I)
 _RETRY = re.compile(r"\b(not (?:working|showing|on|there)|it(?:'s| is) not\b|isn'?t (?:working|showing|on)|try again|"
                     r"nothing (?:shows|showing|is showing|came|happened)|no captions|can'?t see (?:the |any )?captions?|again)\b", re.I)
+_QUOTED = re.compile(r"[\"“'‘`].{4,}?[\"”'’`]")
+_DEICTIC = re.compile(r"^(?:this|that|it|these|them|the video|this video|the audio|what (?:he|she|they)(?:'s| is| are|'re)? saying|"
+                      r"for me|plz|please|pls|now|live)\b", re.I)
+
+
+def typed_text_to_translate(text: str) -> bool:
+    """'translate "where is the station" to Spanish' / 'translate good morning into French': words they typed,
+    not the video playing. (Quotes of any kind, or real words between 'translate' and 'to <language>'.)"""
+    if _QUOTED.search(text):
+        return True
+    m = re.search(rf"\b{_TRANSLATE}\s+(.+?)\s+(?:to|into|in)\s+\w+\s*[?.!]*$", text, re.I)
+    return bool(m and not _DEICTIC.match(m.group(1).strip()))
+
+
 _running = False
 _running_to = ""
 _source = ""
@@ -290,7 +304,7 @@ def pre_llm_call(platform: str = "", user_message: Any = "", session_id: str = "
             _reply[session_id] = ("I've restarted the captions. They show at the bottom of the screen once someone "
                                   "speaks; make sure the video's sound is playing.")
             return {"context": "[VYRSE restarted the live captions. Say so in one sentence; no tool needed.]"}
-    if len(text) > 160 or re.search(r"[\"“].{12,}[\"”]", text):
+    if len(text) > 160 or typed_text_to_translate(text):
         return None  # a passage to translate, not the video
     if _WANTS_ON.search(text) and not _running:
         lang, source = _languages(text)

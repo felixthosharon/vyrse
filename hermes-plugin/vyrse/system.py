@@ -43,6 +43,8 @@ SCHEMA: Dict[str, Any] = {
             "day": {"type": "string", "enum": ["today", "yesterday"], "description": "For rewind: a whole day instead of the last hours."},
             "date": {"type": "string", "description": f"For usage or rewind: one specific day, YYYY-MM-DD. It is {_date.today().year} now: "
                                                       "'on October 15' -> that date this year."},
+            "part": {"type": "string", "enum": ["morning", "afternoon", "evening", "night"],
+                     "description": "For rewind: part of the day ('yesterday afternoon' -> day=yesterday, part=afternoon)."},
             "at": {"type": "string", "description": "For rewind: a clock time, 24h HH:MM ('what was I doing at 3' -> 15:00; at 3 in the "
                                                     "morning -> 03:00). Shows the hour around it, on `date` or today."},
             "period": {"type": "string", "enum": ["today", "week"], "description": "For usage. Default today."},
@@ -339,6 +341,9 @@ def _watch(metric: str, interval: float, minutes: float, above: Optional[float] 
     return out
 
 
+_PARTS = {"morning": (5, 12), "afternoon": (12, 17), "evening": (17, 21), "night": (21, 29)}
+
+
 def _date_param(value: Any) -> Optional["date"]:
     import datetime as _dt
 
@@ -534,10 +539,13 @@ def handle(params: Dict[str, Any], **_: Any) -> str:
                     moment -= _dt.timedelta(days=1)
                 start = moment.timestamp() - 3600
                 end = moment.timestamp() + 3600
-            elif on is not None or params.get("day") in ("today", "yesterday"):
-                d = on or (_dt.date.today() - _dt.timedelta(days=1 if params["day"] == "yesterday" else 0))
+            elif on is not None or params.get("day") in ("today", "yesterday") or params.get("part") in _PARTS:
+                d = on or (_dt.date.today() - _dt.timedelta(days=1 if params.get("day") == "yesterday" else 0))
                 start = time.mktime(d.timetuple())
                 end = start + 86400
+                if params.get("part") in _PARTS:
+                    a, b = _PARTS[params["part"]]
+                    start, end = start + a * 3600, start + b * 3600
             else:
                 end = time.time()
                 start = end - max(0.25, min(48.0, float(params.get("hours") or 3))) * 3600

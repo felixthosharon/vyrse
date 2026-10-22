@@ -67,6 +67,7 @@ BRIEFING_SCHEMA = {
         "properties": {
             "location": {"type": "string", "description": "Only a CITY the user named or saved in memory (never a country or timezone); omit to locate automatically."},
             "news_topic": {"type": "string", "description": "Optional news focus, e.g. 'tech' or 'football'."},
+            "weather_only": {"type": "boolean", "description": "Just the weather (now, today and the next 2 days): 'weather tomorrow', 'will it rain'."},
         },
     },
 }
@@ -275,6 +276,9 @@ def register(ctx) -> None:
 
     chrome.setup()
     ctx.register_tool(name="vyrse_chrome", toolset="vyrse_ui", schema=chrome.SCHEMA, handler=chrome.handle, description=chrome.SCHEMA["description"])
+    from . import testdry
+
+    ctx.register_hook("pre_tool_call", testdry.pre_tool_call)  # first: a test run never touches the PC
     ctx.register_hook("pre_tool_call", chrome.block_other_browser)
     ctx.register_hook("pre_tool_call", ensure_browser)
 
@@ -292,6 +296,11 @@ def register(ctx) -> None:
     from . import onscreen, turn
 
     ctx.register_hook("pre_llm_call", turn.pre_llm_call)
+    from . import router
+
+    ctx.register_hook("pre_llm_call", router.pre_llm_call)  # the clock, and the right tool for everyday asks
+    ctx.register_hook("pre_tool_call", router.pre_tool_call)
+    ctx.register_hook("transform_llm_output", router.transform_llm_output)
     ctx.register_hook("pre_llm_call", onscreen.pre_llm_call)
     ctx.register_hook("pre_llm_call", captions.pre_llm_call)
     ctx.register_hook("transform_llm_output", captions.transform_llm_output)

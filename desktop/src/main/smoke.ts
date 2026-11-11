@@ -20,7 +20,7 @@ export function runSmoke(mode: string, backend: HermesBackend, quit: (exitCode: 
 
   backend.on('status', (status: BackendStatus) => {
     console.log(`[smoke] ${status.phase}: ${status.message}`)
-    if (status.phase === 'failed' || status.phase === 'not-installed') return quit(1)
+    if (status.phase === 'failed' || status.phase === 'not-installed' || status.phase === 'needs-setup') return quit(1)
     if (status.phase !== 'ready') return
 
     const conn = backend.getConnection()!

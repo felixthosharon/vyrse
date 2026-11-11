@@ -299,7 +299,8 @@ export function SettingsPanel() {
                     <p className="text-[10.5px] leading-relaxed text-muted-foreground">
                       <span className="text-foreground">Online models — not connected.</span> VYRSE runs fully on this PC. To add an
                       online provider later, run <span className="font-mono">hermes model</span> in a terminal; it will appear here.
-                      New local models: drop a <span className="font-mono">.gguf</span> into <span className="font-mono">C:\dev\VYRSE\models</span>.
+                      New local models: drop a <span className="font-mono">.gguf</span> into{" "}
+                      {agent?.modelsDir ? <span className="break-all font-mono">{agent.modelsDir}</span> : "your VYRSE models folder"}.
                     </p>
                   </div>
                 )}

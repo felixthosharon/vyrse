@@ -1,7 +1,7 @@
 """Dev harness: vyrse_point action=do / guide on a Word-for-the-web-like page (app inside a cross-origin frame,
 ribbon of plain divs: File -> Export -> Download as PDF -> Download), in HEADLESS Chrome with the VYRSE extension
 (nothing appears on screen). The steps come from the real web lookup, so this checks lookup + finding + clicking.
-Run from the hermes-agent folder: venv/Scripts/python.exe C:/dev/VYRSE/scripts/dev/try_onscreen.py
+Run from the hermes-agent folder: venv/Scripts/python.exe <repo>/scripts/dev/try_onscreen.py
 """
 import http.server
 import json
@@ -19,7 +19,7 @@ import urllib.request
 sys.path.insert(0, os.getcwd())
 import hermes_bootstrap  # noqa: F401
 
-sys.path.insert(0, r"C:\dev\VYRSE\hermes-plugin")
+sys.path.insert(0, str(__import__("pathlib").Path(__file__).resolve().parents[2] / "hermes-plugin"))
 from hermes_cli.config import load_config
 from hermes_cli.local_runtime.bootstrap import ensure_local_runtime
 from vyrse import chrome, onscreen

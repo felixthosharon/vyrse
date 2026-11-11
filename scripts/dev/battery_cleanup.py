@@ -1,7 +1,7 @@
 """Delete the sessions a smoke battery made (VYRSE_SMOKE=battery writes {"stored": id} lines to its output), and
 their workspace boards, after the run has ended. Hermes may write a session row again after the battery deleted
 it (titles are generated in the background), so this runs once the backend is gone.
-Run from hermes-agent: venv/Scripts/python.exe C:/dev/VYRSE/scripts/dev/battery_cleanup.py <battery.jsonl>...
+Run from hermes-agent: venv/Scripts/python.exe <repo>/scripts/dev/battery_cleanup.py <battery.jsonl>...
 """
 import json
 import os

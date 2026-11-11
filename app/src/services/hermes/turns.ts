@@ -103,7 +103,7 @@ export function fallbackReply(payload: Record<string, unknown> | undefined): str
 
 /** Sentences the model wrote to itself ("I should mention this gently.") in thinking that became the reply. */
 const SELF_TALK =
-  /^(?:I should|I need to|I must|I'll (?:now )?(?:respond|reply|answer|mention|keep|make sure|provide|give)|Let me (?:respond|reply|answer|think|check|keep|provide|give)|The user (?:is|wants|asked|said|has)|Felix (?:is asking|wants|asked|said)|Now I|My (?:reply|response|answer) (?:should|will))/i;
+  /^(?:I should|I need to|I must|I'll (?:now )?(?:respond|reply|answer|mention|keep|make sure|provide|give)|Let me (?:respond|reply|answer|think|check|keep|provide|give)|The user (?:is|wants|asked|said|has)|w+ (?:is asking|wants me|asked me)|Now I|My (?:reply|response|answer) (?:should|will))/i;
 
 /**
  * A rescued reply (the answer the model left inside its thinking) can carry its notes to itself. Drop
@@ -159,9 +159,12 @@ export function friendlyError(p: MessageCompletePayload): string {
   // A local model whose built-in chat template can't take this conversation (tools, tool results,
   // or a history started on another model). Gemma 3 has a fixed template; other dropped-in GGUFs may not.
   if (/Unable to generate parser|roles must alternate|chat template|Jinja Exception/i.test(detail))
-    return "This model's chat format can't handle VYRSE's tools or this conversation. Switch back to Qwen in Settings → Assistant → Model, or start a new conversation.";
+    return "This model's chat format can't handle VYRSE's tools or this conversation. Pick a different model in Settings → Assistant → Model (Qwen 3.5 9B works well), or start a new conversation.";
   if (/model .*not found|unknown model|no such model|failed to load model/i.test(detail))
     return "That model isn't available anymore (was its file moved or deleted?). Pick another one in Settings → Assistant → Model.";
+  // A fresh install: Hermes has no model or provider yet.
+  if (/not connected to any AI provider|no default model|no inference provider|no model configured/i.test(detail))
+    return "VYRSE has no AI model yet. Run `hermes model` in a terminal to pick one, or put a .gguf model file in your VYRSE models folder, then ask again.";
   if (/context/i.test(code)) return "That conversation got too long for the model. Start a new one or try again.";
   if (/rate|quota|429/i.test(code)) return "The model provider is rate-limiting requests. Try again shortly.";
   if (/auth|401|403|key/i.test(code)) return "The model provider rejected the credentials. Check the model settings.";

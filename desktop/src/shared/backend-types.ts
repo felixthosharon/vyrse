@@ -10,6 +10,8 @@ export type BackendPhase =
   | 'stopped'
   | 'failed' // gave up (crash loop / start timeout); `detail` + `logTail` explain why
   | 'not-installed' // no Hermes install found
+  | 'needs-setup' // Hermes is there but VYRSE isn't set up in it yet; `setup()` does it
+  | 'setting-up' // setup is running; `detail` is its latest line
 
 export interface BackendStatus {
   phase: BackendPhase
@@ -33,6 +35,7 @@ export const IPC_CHANNELS = {
   getConnection: 'vyrse:backend:get-connection',
   getStatus: 'vyrse:backend:get-status',
   restart: 'vyrse:backend:restart',
+  setup: 'vyrse:backend:setup',
   status: 'vyrse:backend:status',
   presence: 'vyrse:presence',
   orbState: 'vyrse:orb-state',
@@ -139,6 +142,8 @@ export interface VyrseBridge {
     getConnection(): Promise<BackendConnection | null>
     getStatus(): Promise<BackendStatus>
     restart(): Promise<void>
+    /** prepare Hermes for VYRSE (plugin, voice, options), then start */
+    setup(): Promise<void>
     onStatus(callback: (status: BackendStatus) => void): () => void
   }
   desktop: {

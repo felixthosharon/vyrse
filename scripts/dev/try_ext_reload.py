@@ -1,12 +1,12 @@
 """Dev harness: does an out-of-date VYRSE extension reload itself (and come back as the new version)?
 Loads the PREVIOUS commit's extension in headless Chrome, swaps the files for the current ones, lets the bridge
-ask it to reload. Run from hermes-agent: venv/Scripts/python.exe C:/dev/VYRSE/scripts/dev/try_ext_reload.py <old-commit>"""
+ask it to reload. Run from hermes-agent: venv/Scripts/python.exe <repo>/scripts/dev/try_ext_reload.py <old-commit>"""
 import json, logging, os, shutil, subprocess, sys, tempfile, time, urllib.request
 from pathlib import Path
 
 sys.path.insert(0, os.getcwd())
 import hermes_bootstrap  # noqa: F401
-sys.path.insert(0, r"C:\dev\VYRSE\hermes-plugin")
+sys.path.insert(0, str(__import__("pathlib").Path(__file__).resolve().parents[2] / "hermes-plugin"))
 from vyrse import chrome
 
 logging.basicConfig(level=logging.INFO, format="   [log] %(message)s")
@@ -14,9 +14,9 @@ old = sys.argv[1]
 SAME = "--same" in sys.argv  # load the current files and only ask for a reload
 ext = Path(tempfile.mkdtemp(prefix="vyrse-ext-reload-"))
 for name in ("manifest.json", "background.js", "popup.html", "popup.js"):
-    data = (Path(r"C:\dev\VYRSE\chrome-extension") / name).read_bytes() if SAME else subprocess.run(["git", "-C", r"C:\dev\VYRSE", "show", f"{old}:chrome-extension/{name}"], capture_output=True).stdout
+    data = (Path(str(__import__("pathlib").Path(__file__).resolve().parents[2] / "chrome-extension")) / name).read_bytes() if SAME else subprocess.run(["git", "-C", str(__import__("pathlib").Path(__file__).resolve().parents[2]), "show", f"{old}:chrome-extension/{name}"], capture_output=True).stdout
     (ext / name).write_bytes(data)
-shutil.copytree(r"C:\dev\VYRSE\chrome-extension\icons", ext / "icons")
+shutil.copytree(str(__import__("pathlib").Path(__file__).resolve().parents[2] / "chrome-extension" / "icons"), ext / "icons")
 chrome.PORT = 18494
 (ext / "config.js").write_text(f"export const CONFIG = {{ port: {chrome.PORT}, token: {json.dumps(chrome.token())} }}\n")
 chrome.extension_dir = lambda: ext
@@ -36,7 +36,7 @@ try:
         b.send(json.dumps({"id": 1, "method": "Extensions.loadUnpacked", "params": {"path": str(ext)}}))
         print("loaded:", b.recv(timeout=20))
     # the new files land on disk (what VYRSE's install does), then the bridge starts and sees the old one connect
-    for src in Path(r"C:\dev\VYRSE\chrome-extension").glob("*"):
+    for src in Path(str(__import__("pathlib").Path(__file__).resolve().parents[2] / "chrome-extension")).glob("*"):
         if src.is_file() and src.name != "config.js":
             shutil.copyfile(src, ext / src.name)
     if SAME:

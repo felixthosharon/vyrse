@@ -101,6 +101,7 @@ export function createHermesVyrseApi(bridge: VyrseBridge): VyrseApi & { gateway:
     link: {
       subscribe: (callback) => gateway.subscribe(callback),
       restart: () => gateway.restartBackend(),
+      setup: () => gateway.setupBackend(),
     },
     conversations: {
       list: () => sessions.list(),

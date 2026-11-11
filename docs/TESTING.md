@@ -1,9 +1,9 @@
 # Testing VYRSE yourself
 
 ## Start it
-Run `C:\dev\VYRSE\desktop\release\win-unpacked\VYRSE.exe` (the packaged app, nothing gets installed).
+Run `desktop\release\win-unpacked\VYRSE.exe` (the packaged app, nothing gets installed).
 Before the first run, and after any `hermes update`, check Hermes is ready:
-`powershell -ExecutionPolicy Bypass -File C:\dev\VYRSE\scripts\setup.ps1 -Check` → "Hermes is ready for VYRSE."
+`powershell -ExecutionPolicy Bypass -File scripts\setup.ps1 -Check` → "Hermes is ready for VYRSE."
 
 Startup takes ~10 s: the top bar says *connecting*, then *present*. In the background VYRSE pre-loads the
 model (~10 s more); the first answer is slower if you ask during that time.
@@ -20,9 +20,9 @@ model (~10 s more); the first answer is slower if you ask during that time.
 | 7 | Create a test folder, then "delete the folder C:\…\test with rm -rf" | **VYRSE wants permission** dialog. Try Deny, then repeat in a *new* conversation and Allow once |
 | 8 | "Switch to the light theme and open settings" / "back to dark" | The UI changes, and the change survives a restart |
 | 9 | "Turn on gaming mode" | GAMING badge; the local model is unloaded (GPU memory drops in Task Manager) |
-| 10 | Settings → Intelligence → switch the model to Gemma, ask something | Answer from Gemma (slower); switch back |
+| 10 | Settings → Intelligence → switch to another model, ask something | Answer from that model; switch back |
 | 11 | Settings → Skills → search "weather", inspect one, install, remove | Installs (Hermes scans it first), then removes |
-| 12 | Say **"VYRSE"** ("wairz"), pause briefly, ask "what time is it?" | Soft chime → orb listens → spoken answer in ~3 s |
+| 12 | Say **"VYRSE"**, pause briefly, ask "what time is it?" | Soft chime → orb listens → spoken answer in ~3 s |
 | 13 | After it answers, ask a follow-up *without* the wake word within ~6 s | It hears and answers |
 | 14 | While it is speaking, start talking over it | It stops and listens (works best with headphones) |
 | 15 | Tap the mic button instead of using the wake word | Same as 12 |
@@ -41,4 +41,4 @@ model (~10 s more); the first answer is slower if you ask during that time.
 ## If something goes wrong
 - Banner with *Show details* → the Hermes log tail. Full log: `%APPDATA%\vyrse-desktop\logs\hermes-backend.log`.
 - Hermes' own logs: `%LOCALAPPDATA%\hermes\logs\agent.log` (agent, wake word, speech), `llama-server.log` (model).
-- Note what you said or typed and the time; that's enough for me to find it in the logs.
+- Note what you said or typed and the time; that is enough to find it in the logs (add both to a bug report).

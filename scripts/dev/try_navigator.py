@@ -1,20 +1,20 @@
 """Dev harness: the navigator (vyrse_point guide/do, one look per step) on a Word-for-the-web-like page, in a real
 Chrome window placed OFF the screen (nothing appears for the user), with the VYRSE extension on a test port.
 guide: the "user" clicks whatever gets ringed (a browser click at that spot). do: VYRSE clicks by itself.
-Run from hermes-agent: venv/Scripts/python.exe C:/dev/VYRSE/scripts/dev/try_navigator.py do|guide ["goal"]
+Run from hermes-agent: venv/Scripts/python.exe <repo>/scripts/dev/try_navigator.py do|guide ["goal"]
 """
 import http.server, json, logging, os, shutil, socketserver, subprocess, sys, tempfile, threading, time, urllib.request
 from pathlib import Path
 
 sys.path.insert(0, os.getcwd())
 import hermes_bootstrap  # noqa: F401
-sys.path.insert(0, r"C:\dev\VYRSE\hermes-plugin")
+sys.path.insert(0, str(__import__("pathlib").Path(__file__).resolve().parents[2] / "hermes-plugin"))
 from hermes_cli.config import load_config
 from hermes_cli.local_runtime.bootstrap import ensure_local_runtime
 from vyrse import chrome, navigator
 from vyrse.point import locate
 
-sys.path.insert(0, r"C:\dev\VYRSE\scripts\dev")
+sys.path.insert(0, str(__import__("pathlib").Path(__file__).resolve().parents[2] / "scripts" / "dev"))
 from word_page import FRAME  # noqa: E402  (the Word-like test page)
 
 logging.basicConfig(level=logging.WARNING, format="   [log] %(message)s")

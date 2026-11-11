@@ -34,19 +34,25 @@ your conversations, memory and voice never leave your machine unless you choose 
 ## Install
 1. **Install Hermes Agent** (the AI engine): follow https://github.com/NousResearch/hermes-agent. It installs
    to `%LOCALAPPDATA%\hermes` and brings its own Python and llama.cpp.
-2. **Get VYRSE:** download the latest release (installer + `VYRSE.apk`) from the Releases page, or clone this
-   repo to build it yourself (below).
-3. **Set it up:** in the VYRSE folder, run
-   ```powershell
-   powershell -ExecutionPolicy Bypass -File scripts\setup.ps1
-   ```
-   It links the VYRSE plugin into Hermes, installs the voice libraries, downloads and verifies the Kokoro
-   voice model, installs the wake word and VYRSE's skills, and sets the Hermes options VYRSE needs. Safe to run
-   again any time; `-Check` only reports what's missing.
+   Open a new terminal afterwards and run `hermes --version` once, so Hermes finishes setting itself up.
+2. **Install VYRSE:** download `VYRSE-Setup-x.y.z.exe` from the
+   [Releases page](https://github.com/felixthosharon/vyrse/releases/latest) and run it.
+3. **Start VYRSE and press "Set up".** The first time, VYRSE offers to prepare Hermes: it adds the VYRSE plugin,
+   installs the voice libraries, downloads and verifies the Kokoro voice model (about 350 MB), installs the wake
+   word and VYRSE's skills, and sets the Hermes options VYRSE needs. It takes a few minutes and needs
+   [Git for Windows](https://git-scm.com). After an update, VYRSE repeats this by itself.
 4. **Add an AI model**, either way:
    - run `hermes model` and pick a local model (Hermes downloads it), or
-   - drop a `.gguf` file into the `models` folder (see `models/README.md` for what fits your GPU).
-5. **Start VYRSE.** On first run it asks your name. Then say "VYRSE".
+   - drop a `.gguf` file into `%USERPROFILE%\VYRSE\models` (its `README.md` says what fits your GPU).
+5. **Talk to it.** On first run VYRSE asks your name. Then say "VYRSE".
+
+Building from source instead? Clone this repo and run the same setup yourself; your models then go in the repo's
+`models` folder:
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\setup.ps1          # safe to run again any time
+powershell -ExecutionPolicy Bypass -File scripts\setup.ps1 -Check   # only reports what's missing
+```
+Run it again after `hermes update`: an update can drop VYRSE's small Hermes patches and its web search library.
 
 ### Phone app
 1. Install `VYRSE.apk` on your phone (allow installing from your browser/files app).
@@ -62,11 +68,12 @@ and endpoint to paste.
 
 ## Build from source
 ```powershell
-cd app;     npm install; npm run build            # the UI
-cd desktop; npm install; npm run pack             # the desktop app -> desktop\release\win-unpacked\VYRSE.exe
+# from the repo folder
+cd app;        npm install; npm run build         # the UI
+cd ..\desktop; npm install; npm run pack          # the desktop app -> desktop\release\win-unpacked\VYRSE.exe
                                                    # (npm run dist makes an installer)
-cd app;     npm run build:phone; npx cap sync android
-cd app\android; .\gradlew.bat assembleRelease     # the phone app (needs JDK 21 + Android SDK)
+cd ..\app;     npm run build:phone; npx cap sync android
+cd android;    .\gradlew.bat assembleRelease      # the phone app (needs JDK 21 + Android SDK)
 ```
 Tests: `npm test` in `app/` and `desktop/`; `pytest hermes-plugin/vyrse/tests` with the Hermes Python.
 

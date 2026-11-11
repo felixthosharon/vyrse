@@ -14,6 +14,7 @@ import { attachQuickAsk } from './quick'
 import { attachPhoneBridge } from './phone-bridge'
 import { attachOrb } from './orb'
 import { attachOverlay } from './overlay'
+import { findSetupSource } from './setup'
 import { createMainWindow } from './window'
 
 // Test-only: feed Chromium's fake microphone from a WAV file (end-to-end voice smoke tests).
@@ -44,7 +45,10 @@ async function main(): Promise<void> {
   const rendererIndex = app.isPackaged
     ? path.join(process.resourcesPath, 'renderer', 'index.html')
     : path.resolve(__dirname, '..', '..', '..', 'app', 'dist', 'index.html')
-  const backend = new HermesBackend(path.join(app.getPath('logs'), 'hermes-backend.log'))
+  const backend = new HermesBackend(
+    path.join(app.getPath('logs'), 'hermes-backend.log'),
+    findSetupSource(app.isPackaged, process.resourcesPath, app.getVersion()),
+  )
   let quitting = false
 
   let mainWindow: BrowserWindow | null = null

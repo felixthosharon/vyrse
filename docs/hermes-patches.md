@@ -5,6 +5,12 @@ checkout (`%LOCALAPPDATA%\hermes\hermes-agent`, branch `main`): `hermes update` 
 local edits and re-applies them after pulling. The canonical copies live in `hermes-patches/`;
 `scripts/setup.ps1` re-applies any that are missing (`git apply --check` first).
 
+Hermes changes quickly, so a patch can come in more than one version: `0003-name.patch` (the Hermes VYRSE was
+first written against) and `0003-name.hermes-2026-11.patch` (the same change against Hermes as of November 2026).
+Setup treats a numbered patch as applied when any version of it is, and otherwise applies the first version that
+fits the installed Hermes. When Hermes moves again and a patch stops fitting, add a new dated version; don't edit
+the old ones (people on older Hermes still need them).
+
 | Patch | Why |
 |---|---|
 | `0001-skills-search-description.patch` | Bug fix: `skills.manage search` called `SkillMeta.describe()`, which doesn't exist (the field is `description`), so hub search over the gateway always failed with code 5024. One-line, upstreamable. |

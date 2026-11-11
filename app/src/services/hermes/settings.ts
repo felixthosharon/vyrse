@@ -26,6 +26,7 @@ export class HermesSettings {
     if (models.model && models.provider) this.selected = { model: models.model, provider: models.provider };
     const memory = (config["memory"] ?? {}) as Record<string, unknown>;
     const stt = (config["stt"] ?? {}) as { local?: { model?: string } };
+    const vyrse = (config["vyrse"] ?? {}) as { models_dir?: string };
     return {
       model: models.model ?? "",
       provider: models.provider ?? "",
@@ -34,6 +35,7 @@ export class HermesSettings {
       approvalMode: (approvals.value as AgentSettings["approvalMode"]) ?? "manual",
       memoryEnabled: memory["memory_enabled"] === true,
       sttModel: stt.local?.model ?? "base.en",
+      modelsDir: vyrse.models_dir || undefined,
       memoryBytes: Object.values(memoryStatus.builtin_files ?? {}).reduce<number>((a, b) => a + Number(b || 0), 0),
     };
   }

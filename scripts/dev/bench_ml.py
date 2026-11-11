@@ -1,7 +1,7 @@
 import os, sys, time
 sys.path.insert(0, os.getcwd())
 import hermes_bootstrap  # noqa
-sys.path.insert(0, r"C:\dev\VYRSE\hermes-plugin")
+sys.path.insert(0, str(__import__("pathlib").Path(__file__).resolve().parents[2] / "hermes-plugin"))
 from faster_whisper import WhisperModel, decode_audio
 from vyrse.captions import translate_online
 D = sys.argv[1]

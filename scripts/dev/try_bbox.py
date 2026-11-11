@@ -1,6 +1,6 @@
 """Dev harness: can the local vision model put a box on a control by itself (no element list)?
 Captures a window with locate.ps1 (mode=list), asks for each request's box, and compares it with UI Automation's rect.
-Run from the hermes-agent folder: venv/Scripts/python.exe C:/dev/VYRSE/scripts/dev/try_bbox.py <window> <label>...
+Run from the hermes-agent folder: venv/Scripts/python.exe <repo>/scripts/dev/try_bbox.py <window> <label>...
 """
 import os
 import sys
@@ -9,7 +9,7 @@ import time
 sys.path.insert(0, os.getcwd())
 import hermes_bootstrap  # noqa: F401
 
-sys.path.insert(0, r"C:\dev\VYRSE\hermes-plugin")
+sys.path.insert(0, str(__import__("pathlib").Path(__file__).resolve().parents[2] / "hermes-plugin"))
 from pathlib import Path
 
 from hermes_cli.config import load_config

@@ -8,6 +8,7 @@ const CH = {
   getConnection: 'vyrse:backend:get-connection',
   getStatus: 'vyrse:backend:get-status',
   restart: 'vyrse:backend:restart',
+  setup: 'vyrse:backend:setup',
   status: 'vyrse:backend:status',
   presence: 'vyrse:presence',
   orbState: 'vyrse:orb-state',
@@ -50,6 +51,7 @@ const bridge: VyrseBridge = {
     getConnection: () => ipcRenderer.invoke(CH.getConnection) as Promise<BackendConnection | null>,
     getStatus: () => ipcRenderer.invoke(CH.getStatus) as Promise<BackendStatus>,
     restart: () => ipcRenderer.invoke(CH.restart) as Promise<void>,
+    setup: () => ipcRenderer.invoke(CH.setup) as Promise<void>,
     onStatus(callback) {
       const listener = (_event: IpcRendererEvent, status: BackendStatus) => callback(status)
       ipcRenderer.on(CH.status, listener)

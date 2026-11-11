@@ -126,6 +126,8 @@ export interface AgentSettings {
   memoryBytes: number;
   /** local speech-recognition model (faster-whisper), e.g. "base.en" */
   sttModel: string;
+  /** the folder watched for dropped-in .gguf models (Hermes `vyrse.models_dir`), when set */
+  modelsDir?: string;
 }
 
 /** One streamed spoken reply (Hermes speak-stream). */
@@ -228,7 +230,7 @@ export type UiCommand =
 
 /** Connection to the agent backend as the UI presents it. */
 export interface LinkStatus {
-  phase: "starting" | "connecting" | "online" | "reconnecting" | "offline" | "failed" | "not-installed";
+  phase: "starting" | "connecting" | "online" | "reconnecting" | "offline" | "failed" | "not-installed" | "needs-setup" | "setting-up";
   message: string;
   detail?: string;
   logTail?: string[];
@@ -255,6 +257,8 @@ export interface VyrseApi {
   link?: {
     subscribe(callback: (status: LinkStatus) => void): () => void;
     restart(): Promise<void>;
+    /** first run on the desktop: prepare Hermes for VYRSE, then start */
+    setup?(): Promise<void>;
   };
 
   conversations?: {

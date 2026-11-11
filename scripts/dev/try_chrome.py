@@ -2,7 +2,7 @@
 
 Starts the plugin's bridge, launches Chrome with a temp profile, loads the unpacked extension over CDP, serves a
 test page full of unlabeled icon buttons, then drives it with vyrse_chrome the way the model would.
-Run from the hermes-agent folder: venv/Scripts/python.exe C:/dev/VYRSE/scripts/dev/try_chrome.py
+Run from the hermes-agent folder: venv/Scripts/python.exe <repo>/scripts/dev/try_chrome.py
 """
 import http.server
 import json
@@ -19,7 +19,7 @@ import urllib.request
 sys.path.insert(0, os.getcwd())
 import hermes_bootstrap  # noqa: F401
 
-sys.path.insert(0, r"C:\dev\VYRSE\hermes-plugin")
+sys.path.insert(0, str(__import__("pathlib").Path(__file__).resolve().parents[2] / "hermes-plugin"))
 from hermes_cli.config import load_config
 from hermes_cli.local_runtime.bootstrap import ensure_local_runtime
 from vyrse import chrome

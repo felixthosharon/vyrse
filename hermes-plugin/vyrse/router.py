@@ -31,6 +31,8 @@ _RECORD = re.compile(r"\brecord (?:this|the|my|a)? ?(?:lecture|class|lesson|meet
 _WEATHER = re.compile(r"\b(?:weather|forecast|temperature outside|(?:will|is) it (?:going to )?(?:rain|be (?:hot|cold|sunny)))\b", re.I)
 _REWIND = re.compile(r"\bwhat (?:was|were) i (?:doing|working on|watching|up to)\b|\bwhat did i (?:do|have open)\b", re.I)
 
+_HOW_TO = re.compile(r"\s*(?:how (?:do|can|to|would|should)|what(?:'s| is) the (?:way|shortcut|key)|which (?:key|shortcut))\b", re.I)
+
 HINTS = (
     (_MEDIA, "[Music/volume: do it with vyrse_controls now (action=media play_pause/next/previous, or volume). "
              "You haven't done it yet; call the tool before saying it's done.]"),
@@ -46,14 +48,18 @@ HINTS = (
              "(URL-encoded).]"),
     (_REWIND, "[What they were doing: vyrse_system action=rewind (day=yesterday, part=morning|afternoon|evening|night, "
               "at=HH:MM, date=YYYY-MM-DD as they said).]"),
-    (_WEB, "[This changes over time: FIRST call web_search with a short query (e.g. 'iPhone 17 price India'), then answer "
+    (_WEB, "[This changes over time: FIRST call web_search with a short query (e.g. 'iPhone 17 price'), then answer "
            "from those results and name the source. web_extract only for a URL that search returned. Not from memory, "
            "not the browser.]"),
 )
 
 
 def hint_for(text: str) -> Optional[str]:
+    # "how do I take a screenshot?" asks for the way, not for one to be taken
+    how_to = bool(_HOW_TO.match(text))
     for pattern, hint in HINTS:
+        if how_to and pattern in (_SHOT, _RECORD, _EMAIL, _MEDIA):
+            continue
         if pattern.search(text):
             return hint
     return None
@@ -142,6 +148,9 @@ def run_quick(session_id: str, text: str) -> Optional[Dict[str, str]]:
         _reply[session_id] = line or "Nothing's running right now."
         _done[session_id] = {"action": "media"}
         return {"context": f"[VYRSE handled 'stop': {line or 'nothing was running'}. Reply in a few words; no tool needed.]"}
+    style = style_switch(text)
+    if style:
+        return _switch_style(session_id, style)
     found = quick_command(text)
     if not found:
         return None
@@ -171,8 +180,62 @@ def run_quick(session_id: str, text: str) -> Optional[Dict[str, str]]:
                        "don't call vyrse_controls again.]"}
 
 
+# "switch to savage mode", "chill mode", "back to normal": the talk style, switched by VYRSE itself. Left to the model
+# it sometimes only said "switching to chill mode" (and stayed as it was), and read "focus mode" as a study session.
+_STYLE_ASK = (
+    r"^(?:(?:please |plz |ok(?:ay)? |hey |yo )?(?:switch|change|go|set(?: it)?|turn)(?: (?:it|me|us|back|over))*"
+    r" (?:to|into|on) )?(?:the )?(?:talk(?:ing)? style (?:to )?)?(?P<name>{names})(?: (?:mode|style|talk style|vibe))?"
+    r"(?: (?:please|plz|now))?\W*$")
+_STYLE_WORD = r"(?:mode|style|talk style)"
+
+
+def style_switch(text: str) -> Optional[str]:
+    """The talk style they asked to switch to (its id), or None. A bare style name alone isn't a switch
+    ("chill", "normal"): it needs "switch to ..." or "... mode"."""
+    from . import talk_styles
+
+    names = {sid: sid for sid in talk_styles.STYLES}
+    try:
+        from . import styles
+
+        names.update({str(v.get("label", "")).lower(): k for k, v in styles.load().items() if v.get("label")})
+    except Exception:
+        pass
+    t = text.strip().lower()
+    pattern = _STYLE_ASK.replace("{names}", "|".join(re.escape(n) for n in sorted(names, key=len, reverse=True)))
+    m = re.match(pattern, t)
+    if not m:
+        return None
+    asked = re.match(r"^(?:please |plz |ok(?:ay)? |hey |yo )?(?:switch|change|go|set|turn)\b", t) or re.search(rf"\b{_STYLE_WORD}\b", t)
+    return names[m.group("name")] if asked else None
+
+
+def _switch_style(session_id: str, style: str) -> Dict[str, str]:
+    import json
+    import os
+
+    from . import talk_styles, tools
+
+    label = (talk_styles.STYLES.get(style) or {}).get("label") or style.split(":", 1)[-1].title()
+    dry = os.environ.get("VYRSE_TEST_DRY") and "vyrse_ui" not in os.environ.get("VYRSE_TEST_ALLOW", "").split(",")
+    if not dry:
+        try:
+            out = json.loads(tools.handle({"action": "set", "preferences": {"talkStyle": style}}))
+        except Exception as exc:
+            out = {"error": str(exc)}
+        if not (out.get("applied") or {}).get("talkStyle"):
+            return {"context": f"[Switch the talk style with vyrse_ui action=set preferences={{talkStyle: {style}}} now, "
+                               "before saying it's done.]"}
+    _done[session_id] = {"action": "style"}
+    extra = " Short answers from here. For a distraction-free study session, say 'help me focus'." if style == "focus" else ""
+    _reply[session_id] = f"{label} style on.{extra}"
+    return {"context": f"[VYRSE has already switched the talk style to {label}. Reply in a few words; no tool needed.]"}
+
+
 def pre_tool_call(tool_name: str = "", args: Optional[Dict[str, Any]] = None, session_id: str = "", **_: Any) -> Optional[Dict[str, Any]]:
     done = _done.get(session_id)
+    if done and done.get("action") == "style":  # nothing else was asked for: no timers, no second switch
+        return {"action": "block", "message": '{"ok": true, "note": "The talk style is already switched; nothing more to do."}'}
     if tool_name == "vyrse_controls" and done and isinstance(args, dict) and args.get("action") == done["action"]:
         return {"action": "block", "message": '{"ok": true, "note": "Already done by VYRSE this turn; don\'t repeat it."}'}
     return None

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { AlertTriangle, Loader2, RotateCw } from "lucide-react";
+import { AlertTriangle, Download, Loader2, RotateCw } from "lucide-react";
 import { useVyrse } from "@/lib/vyrse/store";
 import { cn } from "@/lib/utils";
 
@@ -8,12 +8,14 @@ import { cn } from "@/lib/utils";
  * crashed or not installed — and offers the one action that helps. Hidden when online.
  */
 export function LinkBanner() {
-  const { link, restartBackend, booted } = useVyrse();
+  const { link, restartBackend, setupBackend, booted } = useVyrse();
   const [showLog, setShowLog] = useState(false);
   if (!booted || link.phase === "online") return null;
 
-  const transient = link.phase === "starting" || link.phase === "connecting" || link.phase === "reconnecting";
+  const transient =
+    link.phase === "starting" || link.phase === "connecting" || link.phase === "reconnecting" || link.phase === "setting-up";
   const failed = link.phase === "failed" || link.phase === "offline";
+  const needsSetup = link.phase === "needs-setup";
 
   return (
     <div className="pointer-events-auto mx-auto mb-2 w-full max-w-[min(44rem,90vw)] rounded-xl border border-border-strong bg-surface/80 px-4 py-2.5 backdrop-blur">
@@ -27,8 +29,18 @@ export function LinkBanner() {
           <p className="text-[12.5px] text-foreground">
             {link.phase === "not-installed" ? "Hermes Agent isn't installed" : link.message}
           </p>
-          {link.detail && <p className="pt-0.5 text-[11px] text-muted-foreground">{link.detail}</p>}
+          {link.detail && <p className={cn("pt-0.5 text-[11px] text-muted-foreground", link.phase === "setting-up" && "truncate")}>{link.detail}</p>}
         </div>
+        {needsSetup && (
+          <button
+            type="button"
+            onClick={setupBackend}
+            className="flex shrink-0 items-center gap-1.5 rounded-full border border-primary/50 px-3 py-1 text-[11px] text-foreground transition-colors hover:border-primary"
+          >
+            <Download className="size-3" strokeWidth={1.8} />
+            Set up
+          </button>
+        )}
         {failed && (
           <button
             type="button"
@@ -40,7 +52,7 @@ export function LinkBanner() {
           </button>
         )}
       </div>
-      {link.logTail && link.logTail.length > 0 && failed && (
+      {link.logTail && link.logTail.length > 0 && (failed || needsSetup) && (
         <div className="mt-2">
           <button
             type="button"

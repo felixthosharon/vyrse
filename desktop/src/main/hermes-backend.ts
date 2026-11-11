@@ -6,7 +6,8 @@ import os from 'node:os'
 
 import type { BackendConnection, BackendStatus } from '../shared/backend-types'
 import { LogTail, parseReadyPort, RestartPolicy } from './backend-policy'
-import { locateHermes, type HermesInstall } from './hermes-locator'
+import { hermesCommand, locateHermes, type HermesInstall } from './hermes-locator'
+import { runSetup, setupState, type SetupSource } from './setup'
 
 const READY_TIMEOUT_MS = 90_000
 const HEALTH_TIMEOUT_MS = 20_000
@@ -40,7 +41,10 @@ export class HermesBackend extends EventEmitter<HermesBackendEvents> {
   private restartTimer: NodeJS.Timeout | null = null
   private install: HermesInstall | null = null
 
-  constructor(private readonly logFile?: string) {
+  constructor(
+    private readonly logFile?: string,
+    private readonly setupSource: SetupSource | null = null,
+  ) {
     super()
   }
 
@@ -69,7 +73,43 @@ export class HermesBackend extends EventEmitter<HermesBackendEvents> {
       })
       return
     }
+    const state = setupState(this.install.hermesHome, this.setupSource)
+    if (state === 'missing') {
+      this.setStatus({
+        phase: 'needs-setup',
+        message: "VYRSE isn't set up in Hermes yet",
+        detail: this.setupSource
+          ? 'Setting up adds the VYRSE plugin, its voice (a 350 MB download) and the options it needs. It takes a few minutes.'
+          : 'Run scripts/setup.ps1 from the VYRSE folder, then press Retry.',
+      })
+      return
+    }
+    // A newer VYRSE was installed over an older one: bring Hermes up to date, then start either way.
+    if (state === 'stale') await this.applySetup('Updating VYRSE in Hermes')
     await this.spawnOnce()
+  }
+
+  /** First-time setup, asked for by the user from the banner; starts Hermes when it worked. */
+  async setup(): Promise<void> {
+    if (this.status.phase !== 'needs-setup' || !this.install) return
+    if (!this.setupSource) return this.start()
+    if (await this.applySetup('Setting up VYRSE')) return this.start()
+    // The plugin is in: what's left (a download, say) is retried by the next setup.
+    if (setupState(this.install.hermesHome, this.setupSource) !== 'missing') return this.start()
+    this.setStatus({
+      phase: 'needs-setup',
+      message: "Setup didn't finish",
+      detail: 'Check the details below, then try again.',
+      logTail: this.logTail.last(),
+    })
+  }
+
+  private async applySetup(message: string): Promise<boolean> {
+    this.setStatus({ phase: 'setting-up', message })
+    return runSetup(this.setupSource!, this.install!.hermesHome, line => {
+      this.log(`[setup] ${line}`)
+      this.setStatus({ phase: 'setting-up', message, detail: line.trim() })
+    })
   }
 
   /** User-initiated restart: resets the crash budget. */
@@ -108,11 +148,13 @@ export class HermesBackend extends EventEmitter<HermesBackendEvents> {
     this.connection = null
     this.setStatus({ phase: 'starting', message: 'Starting Hermes', attempt: this.policy.attemptCount })
 
+    // --isolated: never attach to (or be blocked by) another host backend; VYRSE owns this one.
+    const command = hermesCommand(install, ['serve', '--host', '127.0.0.1', '--port', '0', '--isolated'])
     const child = spawn(
-      install.python,
-      // --isolated: never attach to (or be blocked by) another host backend; VYRSE owns this one.
-      ['-m', 'hermes_cli.main', 'serve', '--host', '127.0.0.1', '--port', '0', '--isolated'],
+      command.file,
+      command.args,
       {
+        windowsVerbatimArguments: command.verbatim,
         cwd: os.homedir(),
         env: {
           ...process.env,

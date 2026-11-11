@@ -1,6 +1,6 @@
 """Dev harness: one real VYRSE turn against a separate `hermes serve` (works while the VYRSE app is open).
 Prints each tool call and the reply. On-screen jobs run dry (VYRSE_ONSCREEN_DRY): nothing on the real screen is
-clicked. Run from the hermes-agent folder: venv/Scripts/python.exe C:/dev/VYRSE/scripts/dev/try_turn.py "<prompt>"...
+clicked. Run from the hermes-agent folder: venv/Scripts/python.exe <repo>/scripts/dev/try_turn.py "<prompt>"...
 """
 import json
 import os

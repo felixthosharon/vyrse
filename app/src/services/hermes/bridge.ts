@@ -13,7 +13,9 @@ export type BackendPhase =
   | "stopping"
   | "stopped"
   | "failed"
-  | "not-installed";
+  | "not-installed"
+  | "needs-setup"
+  | "setting-up";
 
 export interface BackendStatus {
   phase: BackendPhase;
@@ -35,6 +37,8 @@ export interface VyrseBridge {
     getConnection(): Promise<BackendConnection | null>;
     getStatus(): Promise<BackendStatus>;
     restart(): Promise<void>;
+    /** prepare Hermes for VYRSE, then start (desktop only; older shells lack it) */
+    setup?(): Promise<void>;
     onStatus(callback: (status: BackendStatus) => void): () => void;
   };
   /** present in the desktop app (older shells may lack it) */

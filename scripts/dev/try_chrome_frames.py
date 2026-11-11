@@ -1,7 +1,7 @@
 """Dev harness: a Word-online-like page (the whole app inside a cross-origin iframe, a ribbon of plain divs that
 expose no controls) driven through the VYRSE extension in a THROWAWAY Chrome profile. Checks reading across frames,
 clicking by looking at the screenshot, refs inside the frame, and that a ring goes away when the user clicks it.
-Run from the hermes-agent folder: venv/Scripts/python.exe C:/dev/VYRSE/scripts/dev/try_chrome_frames.py
+Run from the hermes-agent folder: venv/Scripts/python.exe <repo>/scripts/dev/try_chrome_frames.py
 """
 import http.server
 import json
@@ -18,7 +18,7 @@ import urllib.request
 sys.path.insert(0, os.getcwd())
 import hermes_bootstrap  # noqa: F401
 
-sys.path.insert(0, r"C:\dev\VYRSE\hermes-plugin")
+sys.path.insert(0, str(__import__("pathlib").Path(__file__).resolve().parents[2] / "hermes-plugin"))
 from hermes_cli.config import load_config
 from hermes_cli.local_runtime.bootstrap import ensure_local_runtime
 from vyrse import chrome

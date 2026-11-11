@@ -4,7 +4,7 @@ sys.path.insert(0, os.getcwd())
 import hermes_bootstrap  # noqa
 import numpy as np
 from faster_whisper import decode_audio
-spec = importlib.util.spec_from_file_location("vyrse_plugin_captions", r"C:\dev\VYRSE\hermes-plugin\vyrse\captions.py")
+spec = importlib.util.spec_from_file_location("vyrse_plugin_captions", str(__import__("pathlib").Path(__file__).resolve().parents[2] / "hermes-plugin" / "vyrse" / "captions.py"))
 mod = importlib.util.module_from_spec(spec); spec.loader.exec_module(mod)
 mod.warm()
 for f in sys.argv[1:]:

@@ -79,7 +79,8 @@ describe("fallbackReply", () => {
 describe("friendlyError", () => {
   it("explains template failures and missing models", () => {
     expect(friendlyError({ status: "error", error: "HTTP 400: Unable to generate parser for this template." } as never)).toMatch(/chat format/);
-    expect(friendlyError({ status: "error", error: "Conversation roles must alternate user/assistant" } as never)).toMatch(/Switch back to Qwen/);
+    expect(friendlyError({ status: "error", error: "Conversation roles must alternate user/assistant" } as never)).toMatch(/Pick a different model/);
+    expect(friendlyError({ status: "error", error: "Hermes is not connected to any AI provider yet. Run `hermes model` to pick one" } as never)).toMatch(/no AI model yet/);
     expect(friendlyError({ status: "error", error: "model gemma not found" } as never)).toMatch(/isn't available/);
   });
 });

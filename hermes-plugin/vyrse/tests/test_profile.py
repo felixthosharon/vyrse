@@ -52,9 +52,9 @@ def test_redo_replaces_and_cancel_writes_nothing(tmp_path, monkeypatch):
     assert soul.count(profile.START) == 1 and "Game developer" in soul and "Student" not in soul
 
     monkeypatch.setattr(confirm, "ask", lambda q, choices, **k: "Not yet")
-    profile.handle({"action": "note", "field": "city", "value": "Kochi"})
+    profile.handle({"action": "note", "field": "city", "value": "Lisbon"})
     out = json.loads(profile.handle({"action": "save"}))
-    assert out["saved"] is False and "Kochi" not in (tmp_path / "SOUL.md").read_text(encoding="utf-8")
+    assert out["saved"] is False and "Lisbon" not in (tmp_path / "SOUL.md").read_text(encoding="utf-8")
 
 
 def test_answers_cant_break_out_of_the_section(tmp_path, monkeypatch):

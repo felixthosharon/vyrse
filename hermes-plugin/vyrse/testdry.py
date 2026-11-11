@@ -25,6 +25,7 @@ _READ_ONLY: Dict[str, Optional[tuple]] = {
     "vyrse_log": ("show", "list"),
     "vyrse_style": ("list",),
     "vyrse_point": None,
+    "vyrse_focus": ("status",),
     "memory": None,
     "cronjob": ("list",),
     "computer_use": None,

@@ -46,6 +46,8 @@ interface VyrseContextValue {
   /** connection to Hermes */
   link: LinkStatus;
   restartBackend: () => void;
+  /** first run: prepare Hermes for VYRSE */
+  setupBackend: () => void;
 
   /** Hermes-owned agent settings; null until Hermes is connected */
   agent: AgentSettings | null;
@@ -1531,6 +1533,7 @@ export function VyrseProvider({ children }: { children: ReactNode }) {
     resolvedTheme,
     link: state.link,
     restartBackend: useCallback(() => void api.link?.restart(), [api]),
+    setupBackend: useCallback(() => void (api.link?.setup ?? api.link?.restart)?.(), [api]),
     agent: state.agent,
     setModel,
     setReasoning,

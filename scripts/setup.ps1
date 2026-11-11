@@ -13,24 +13,42 @@
     6. sets the Hermes config VYRSE relies on (never overwrites choices you changed later)
 
   -Check reports what is missing without changing anything.
+  -Captions ml adds a better live-caption model for a language Whisper barely knows (a large one-time download).
 
 .EXAMPLE
   powershell -ExecutionPolicy Bypass -File scripts\setup.ps1
   powershell -ExecutionPolicy Bypass -File scripts\setup.ps1 -Check
+  powershell -ExecutionPolicy Bypass -File scripts\setup.ps1 -Captions ml
 #>
 param(
   [switch]$Check,
   # Optional local copy of the fp32 Kokoro model (kokoro-v1.0.onnx, ~325 MB); otherwise it is downloaded and verified.
-  [string]$KokoroModel = ""
+  [string]$KokoroModel = "",
+  # Where your .gguf models go (default: the models folder of this VYRSE folder).
+  [string]$ModelsDir = "",
+  # Languages to add a specialist live-caption model for (ml = Malayalam). Off by default: converting one
+  # downloads PyTorch and the model, a few GB, once.
+  [string[]]$Captions = @()
 )
 # Native tools (git, hermes) write warnings to stderr; failures are checked explicitly instead.
 $ErrorActionPreference = 'Continue'
 $Repo = Split-Path -Parent $PSScriptRoot
+if (-not $ModelsDir) { $ModelsDir = Join-Path $Repo 'models' }
 $HermesHome = if ($env:HERMES_HOME) { $env:HERMES_HOME } else { Join-Path $env:LOCALAPPDATA 'hermes' }
 $Agent = Join-Path $HermesHome 'hermes-agent'
-$Py = Join-Path $Agent 'venv\Scripts\python.exe'
-$Hermes = Join-Path $Agent 'venv\Scripts\hermes.exe'
-$Uv = Join-Path $HermesHome 'bin\uv.exe'
+# Hermes' own launcher picks the right Python for the install; installs from before it have a venv in the checkout.
+$Hermes = Join-Path $Agent '.hermes\bin\hermes.cmd'
+if (-not (Test-Path $Hermes)) { $Hermes = Join-Path $Agent 'venv\Scripts\hermes.exe' }
+# The Python Hermes actually runs in: the environment its package manager recorded (installs\<id>\facts.json),
+# newest first; else that old venv. VYRSE's extra libraries are checked and installed against this one.
+$Py = $null
+foreach ($facts in @(Get-ChildItem (Join-Path $HermesHome 'installs\*\facts.json') -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending)) {
+  try { $envDir = (Get-Content $facts.FullName -Raw | ConvertFrom-Json).packages.venv.environment } catch { continue }
+  if ($envDir -and (Test-Path (Join-Path $envDir 'Scripts\python.exe'))) { $Py = Join-Path $envDir 'Scripts\python.exe'; break }
+}
+if (-not $Py) { $Py = Join-Path $Agent 'venv\Scripts\python.exe' }
+# Hermes brings its own uv; where it sits has moved between Hermes versions.
+$Uv = @((Join-Path $HermesHome 'bin\uv.exe')) + @(Get-ChildItem (Join-Path $HermesHome 'tools\uv-*\uv.exe') -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending | ForEach-Object FullName) + @((Get-Command uv -ErrorAction SilentlyContinue).Source) | Where-Object { $_ -and (Test-Path $_) } | Select-Object -First 1
 $VyrseDir = Join-Path $HermesHome 'vyrse'
 $Problems = 0
 
@@ -43,29 +61,55 @@ Write-Host "VYRSE setup ($(if ($Check) { 'check only' } else { 'apply' }))  Herm
 
 # 1. Hermes -------------------------------------------------------------------------------
 Write-Host "Hermes Agent"
-if (-not (Test-Path $Py) -or -not (Test-Path $Hermes)) {
-  Fail "Hermes Agent not found at $Agent. Install it first: https://hermes-agent.nousresearch.com"
+if (-not (Test-Path (Join-Path $Agent 'hermes_cli')) -or -not (Test-Path $Hermes)) {
+  Fail "Hermes Agent not found at $Agent. Install it first: https://github.com/NousResearch/hermes-agent"
+  exit 1
+}
+if (-not (Test-Path $Py)) {
+  Fail "Hermes is installed but hasn't finished setting itself up (no Python environment yet). Run 'hermes --version' in a new terminal once, then run this again."
   exit 1
 }
 Ok ((& $Hermes --version 2>$null | Select-Object -First 1))
 
 # 2. Patches ------------------------------------------------------------------------------
 Write-Host "Hermes patches"
-foreach ($patch in Get-ChildItem (Join-Path $Repo 'hermes-patches') -Filter *.patch | Sort-Object Name) {
-  git -C $Agent apply --check --reverse $patch.FullName 2>$null
-  if ($LASTEXITCODE -eq 0) { Ok "$($patch.Name) applied"; continue }
-  git -C $Agent apply --check $patch.FullName 2>$null
-  if ($LASTEXITCODE -ne 0) { Fail "$($patch.Name) no longer applies cleanly (Hermes changed upstream) - needs a refresh"; continue }
-  if ($Check) { Todo "$($patch.Name) not applied" } else { git -C $Agent apply $patch.FullName; Did "$($patch.Name) applied" }
+# Hermes moves fast, so a patch can exist in several versions (0003-name.patch, 0003-name.hermes-2026-11.patch):
+# the same change written against different Hermes releases. Each numbered patch is in when any of its versions
+# is; otherwise the first version that fits this Hermes goes in (exactly, or with the lines around it shifted).
+$Git = (Get-Command git -ErrorAction SilentlyContinue).Source
+if (-not $Git) { $Git = Get-ChildItem (Join-Path $HermesHome 'tools\git*') -Recurse -Filter git.exe -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty FullName }
+$PatchGroups = @(Get-ChildItem (Join-Path $Repo 'hermes-patches') -Filter *.patch | Sort-Object Name | Group-Object { $_.Name.Substring(0, 4) })
+if (-not $Git) {
+  Fail "git not found, so VYRSE's Hermes patches can't be applied. Install Git for Windows (https://git-scm.com), then run this again."
+  $PatchGroups = @()
+}
+foreach ($group in $PatchGroups) {
+  $name = $group.Group[0].BaseName -replace '\.hermes-.*$', ''
+  $in = $false
+  foreach ($patch in $group.Group) { & $Git -C $Agent apply --check --reverse $patch.FullName 2>$null; if ($LASTEXITCODE -eq 0) { $in = $true; break } }
+  if ($in) { Ok "$name applied"; continue }
+  $fit = $null
+  foreach ($context in @(@(), @('-C1'))) {
+    foreach ($patch in $group.Group) { & $Git -C $Agent apply --check @context $patch.FullName 2>$null; if ($LASTEXITCODE -eq 0) { $fit = @{ File = $patch.FullName; Args = $context }; break } }
+    if ($fit) { break }
+  }
+  if (-not $fit) { Fail "$name doesn't fit this version of Hermes (Hermes changed). VYRSE needs an update: please report it at https://github.com/felixthosharon/vyrse/issues"; continue }
+  if ($Check) { Todo "$name not applied"; continue }
+  $fitArgs = $fit.Args
+  & $Git -C $Agent apply @fitArgs $fit.File 2>$null
+  if ($LASTEXITCODE -eq 0) { Did "$name applied" } else { Fail "$name could not be applied" }
 }
 
 # 3. Plugin -------------------------------------------------------------------------------
 Write-Host "vyrse plugin"
 $PluginLink = Join-Path $HermesHome 'plugins\vyrse'
 $PluginSrc = Join-Path $Repo 'hermes-plugin\vyrse'
-if (Test-Path $PluginLink) { Ok "linked: $PluginLink" }
+if (Test-Path (Join-Path $PluginLink 'plugin.yaml')) { Ok "linked: $PluginLink" }
 elseif ($Check) { Todo "plugin not linked" }
 else {
+  # A link left by a VYRSE folder that was moved or deleted points nowhere: replace it (the link only).
+  $stale = Get-Item $PluginLink -Force -ErrorAction SilentlyContinue
+  if ($stale -and $stale.LinkType -eq 'Junction') { [IO.Directory]::Delete($PluginLink) }
   New-Item -ItemType Directory -Force (Split-Path $PluginLink) | Out-Null
   New-Item -ItemType Junction -Path $PluginLink -Target $PluginSrc | Out-Null
   Did "linked $PluginLink -> $PluginSrc"
@@ -81,12 +125,15 @@ $Pylib = Join-Path $VyrseDir 'pylib'
 & $Py -c "import sys; sys.path.append(r'$Pylib'); import kokoro_onnx, phonemizer, espeakng_loader, pypdf" 2>$null
 if ($LASTEXITCODE -eq 0) { Ok "kokoro-onnx, phonemizer, espeakng-loader, pypdf" }
 elseif ($Check) { Todo "voice libraries missing" }
+elseif (-not $Uv) { Fail "uv not found in $HermesHome (it comes with Hermes): the voice libraries can't be installed. Reinstall Hermes Agent, then run this again." }
 else {
   New-Item -ItemType Directory -Force $Pylib | Out-Null
   & $Uv pip install --python $Py --target $Pylib --no-deps kokoro-onnx==0.6.1 | Out-Null
   & $Uv pip install --python $Py --target $Pylib phonemizer==3.4.0 espeakng-loader==0.2.4 | Out-Null
   & $Uv pip install --python $Py --target $Pylib pypdf==5.4.0 | Out-Null  # reading PDFs ("break it down")
-  Did "installed (numpy/onnxruntime come from the Hermes venv)"
+  & $Py -c "import sys; sys.path.append(r'$Pylib'); import kokoro_onnx, phonemizer, espeakng_loader, pypdf" 2>$null
+  if ($LASTEXITCODE -eq 0) { Did "installed (numpy/onnxruntime come from the Hermes venv)" }
+  else { Fail "voice libraries did not install (no internet?). VYRSE will have no voice until this works: run setup again." }
 }
 
 # Web search: Hermes' free search backend (ddgs) is an optional extra. Without it web_search is silently missing
@@ -98,9 +145,12 @@ if (-not $RunEnv -or -not (Test-Path (Join-Path $RunEnv 'pyvenv.cfg'))) { $RunEn
 & $Py -c "import sys, os; sys.path.insert(0, r'$Agent'); os.chdir(r'$Agent'); import hermes_bootstrap; import ddgs" 2>$null
 if ($LASTEXITCODE -eq 0) { Ok "ddgs (web_search)" }
 elseif ($Check) { Todo "web search backend missing (ddgs)" }
+elseif (-not $Uv) { Fail "uv not found: web search (ddgs) can't be installed" }
 else {
   & $Uv pip install --python $RunEnv ddgs==9.16.0 | Out-Null  # the version Hermes pins for this extra
-  Did "installed ddgs into $RunEnv"
+  & $Py -c "import sys, os; sys.path.insert(0, r'$Agent'); os.chdir(r'$Agent'); import hermes_bootstrap; import ddgs" 2>$null
+  if ($LASTEXITCODE -eq 0) { Did "installed ddgs into $RunEnv" }
+  else { Fail "web search (ddgs) did not install (no internet?). VYRSE can't search the web until this works: run setup again." }
 }
 
 # 5. Models -------------------------------------------------------------------------------
@@ -138,10 +188,11 @@ else { Copy-Item (Join-Path $Repo 'assets\voice\wake\vyrse-generic.npz') $wake; 
 # 5a. Live-caption models for languages Whisper small barely knows ----------------------------------------
 # CTranslate2 conversions of Whisper fine-tunes (captions.py SPECIALISTS), made once in a throwaway uv env.
 Write-Host "Caption models"
-$captionModels = @(@{ dir = 'whisper-small-ml'; repo = 'sajilck/whisper-small-malayalam'; lang = 'Malayalam' })
+$captionModels = @(@{ code = 'ml'; dir = 'whisper-small-ml'; repo = 'sajilck/whisper-small-malayalam'; lang = 'Malayalam' })
 foreach ($cm in $captionModels) {
   $dest = Join-Path $HermesHome "vyrse\models\$($cm.dir)"
   if (Test-Path (Join-Path $dest 'model.bin')) { Ok "$($cm.lang) ($($cm.dir))"; continue }
+  if ($Captions -notcontains $cm.code) { Write-Host "  [skip] $($cm.lang): optional, add it with -Captions $($cm.code)" -ForegroundColor DarkGray; continue }
   if ($Check) { Todo "$($cm.lang) caption model missing"; continue }
   & uvx --python 3.11 --with 'transformers==4.46.3' --with torch --with 'setuptools<70' --with 'ctranslate2==4.5.0' `
     --from 'ctranslate2==4.5.0' ct2-transformers-converter --model $cm.repo --output_dir $dest --quantization int8 `
@@ -206,7 +257,7 @@ $settings = @(
   @('wake_word.surface', 'gui', 'always'),
   @('wake_word.phrase', 'vyrse', 'default'),
   @('wake_word.start_new_session', 'false', 'default'),
-  @('vyrse.models_dir', (Join-Path $Repo 'models'), 'default'),
+  @('vyrse.models_dir', $ModelsDir, 'default'),
   @('auth.adopt_external_logins', 'false', 'default')
 )
 foreach ($s in $settings) {

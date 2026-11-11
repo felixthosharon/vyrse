@@ -7,7 +7,7 @@ import time
 sys.path.insert(0, os.getcwd())
 import hermes_bootstrap  # noqa: F401
 
-sys.path.insert(0, r"C:\dev\VYRSE\hermes-plugin")
+sys.path.insert(0, str(__import__("pathlib").Path(__file__).resolve().parents[2] / "hermes-plugin"))
 from hermes_cli.config import load_config
 from hermes_cli.local_runtime.bootstrap import ensure_local_runtime
 from vyrse.lookup import how_to

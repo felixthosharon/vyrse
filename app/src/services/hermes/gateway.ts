@@ -8,7 +8,7 @@ import { reconnectBackoffDelayMs } from "./vendor/reconnect-backoff";
  * What the UI shows about the link to Hermes. `backend` is the desktop shell's view of
  * the process; `socket` is this renderer's WebSocket.
  */
-export type LinkPhase = "starting" | "connecting" | "online" | "reconnecting" | "offline" | "failed" | "not-installed";
+export type LinkPhase = "starting" | "connecting" | "online" | "reconnecting" | "offline" | "failed" | "not-installed" | "needs-setup" | "setting-up";
 
 export interface LinkState {
   phase: LinkPhase;
@@ -134,6 +134,10 @@ export class HermesGateway {
     return this.bridge.backend.restart();
   }
 
+  setupBackend(): Promise<void> {
+    return this.bridge.backend.setup?.() ?? this.bridge.backend.restart();
+  }
+
   private async onBackendStatus(status: BackendStatus): Promise<void> {
     this.backendReady = status.phase === "ready";
     if (status.phase === "ready") {
@@ -153,8 +157,8 @@ export class HermesGateway {
     const phase: LinkPhase =
       status.phase === "failed"
         ? "failed"
-        : status.phase === "not-installed"
-          ? "not-installed"
+        : status.phase === "not-installed" || status.phase === "needs-setup" || status.phase === "setting-up"
+          ? status.phase
           : status.phase === "restarting"
             ? "reconnecting"
             : status.phase === "stopped" || status.phase === "stopping"

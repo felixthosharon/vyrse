@@ -292,12 +292,12 @@ def test_names_and_classes_pick_a_control_without_guessing():
 
     chrome_bar = [
         {"type": "Button", "name": "Reload", "cls": "ReloadButton", "rect": {"x": 0, "y": 0, "width": 30, "height": 30}},
-        {"type": "Button", "name": "Felix", "cls": "AvatarToolbarButton", "rect": {"x": 900, "y": 0, "width": 30, "height": 30}},
+        {"type": "Button", "name": "Alex", "cls": "AvatarToolbarButton", "rect": {"x": 900, "y": 0, "width": 30, "height": 30}},
         {"type": "Button", "name": "Chrome", "cls": "BrowserAppMenuButton", "rect": {"x": 940, "y": 0, "width": 30, "height": 30}},
         {"type": "Button", "name": "New Tab", "cls": "TabStripControlButton", "rect": {"x": 300, "y": 0, "width": 30, "height": 30}},
         {"type": "Button", "name": "Tab search", "cls": "TabStripFlatEdgeButton", "rect": {"x": 10, "y": 0, "width": 30, "height": 30}},
     ]
-    assert see._by_words(chrome_bar, "Profile (At the top right, select Profile)")["name"] == "Felix"
+    assert see._by_words(chrome_bar, "Profile (At the top right, select Profile)")["name"] == "Alex"
     assert see._by_words(chrome_bar, "the three dots menu")["name"] == "Chrome"
     assert see._by_words(chrome_bar, "the new tab plus")["name"] == "New Tab"
     assert see._by_words(chrome_bar, "a rocket") is None  # nothing shares a word: the vision model decides
@@ -463,7 +463,7 @@ def test_guide_rings_reach_the_window_that_asked(monkeypatch):
     monkeypatch.setattr(navigator, "_wait_for_user", lambda window, me: False)
 
     def turn():
-        set_session_vars(platform="vyrse", ui_session_id="ui-felix", session_id="s1")
+        set_session_vars(platform="vyrse", ui_session_id="ui-test", session_id="s1")
         return navigator.start("export as pdf", "guide", {"window": "Word"}, private=True)
 
     out = contextvars.copy_context().run(turn)
@@ -471,7 +471,7 @@ def test_guide_rings_reach_the_window_that_asked(monkeypatch):
     deadline = _time.time() + 5
     while not any(op == "show" for _, op in sent) and _time.time() < deadline:
         _time.sleep(0.05)
-    assert ("ui-felix", "show") in sent
+    assert ("ui-test", "show") in sent
 
 
 def test_a_page_updating_itself_is_not_the_user_clicking():

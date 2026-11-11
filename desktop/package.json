@@ -1,7 +1,7 @@
 {
   "name": "vyrse-desktop",
   "private": true,
-  "version": "1.5.0",
+  "version": "1.6.0",
   "description": "VYRSE desktop shell: runs Hermes Agent and hosts the VYRSE UI",
   "main": "build/main/main.js",
   "scripts": {
@@ -16,7 +16,7 @@
   "devDependencies": {
     "@types/node": "^24.0.0",
     "cross-env": "^10.0.0",
-    "electron": "44.5.1",
+    "electron": "44.9.1",
     "electron-builder": "^26.15.3",
     "typescript": "^5.8.3",
     "vitest": "^5.0.3"
@@ -38,6 +38,42 @@
       {
         "from": "../app/dist",
         "to": "renderer"
+      },
+      {
+        "from": "../scripts/setup.ps1",
+        "to": "setup/scripts/setup.ps1"
+      },
+      {
+        "from": "../hermes-plugin",
+        "to": "setup/hermes-plugin",
+        "filter": [
+          "**/*",
+          "!**/__pycache__/**",
+          "!**/.pytest_cache/**",
+          "!**/tests/**"
+        ]
+      },
+      {
+        "from": "../hermes-patches",
+        "to": "setup/hermes-patches"
+      },
+      {
+        "from": "../assets/templates",
+        "to": "setup/assets/templates"
+      },
+      {
+        "from": "../assets/voice/wake",
+        "to": "setup/assets/voice/wake",
+        "filter": [
+          "vyrse-generic.npz"
+        ]
+      },
+      {
+        "from": "../models",
+        "to": "setup/models",
+        "filter": [
+          "README.md"
+        ]
       }
     ],
     "win": {

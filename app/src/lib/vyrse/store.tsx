@@ -32,6 +32,7 @@ import type {
 } from "@/services/vyrse-api";
 import { createLevelSource, type LevelSource } from "./audio";
 import { VoiceController, type VoicePhase } from "../voice/voice-controller";
+import { isAlarm, isDecline } from "./alarm";
 import { configureUiSounds, playUiSound, preloadUiSounds, startAlarm, stopAlarm } from "./ui-sounds";
 import { makeMessage, newId } from "./mock-ai";
 import { loadSettings, saveSettings } from "./settings/storage";
@@ -410,7 +411,7 @@ export function VyrseProvider({ children }: { children: ReactNode }) {
       dispatch({ type: "clarify/remove", id: prompt.id });
       if (prompt.id.startsWith(CONFIRM_PREFIX)) {
         const said = answers?.["choice"];
-        if (!said || /^(?:cancel|not now|no|deny)/i.test(said)) playUiSound("deny");
+        if (isDecline(said)) playUiSound("deny");
         void api.ui?.answerConfirm(prompt.id.slice(CONFIRM_PREFIX.length), answers?.["choice"] ?? null).catch((err) =>
           console.warn("[vyrse] confirm answer failed:", err),
         );
@@ -779,7 +780,7 @@ export function VyrseProvider({ children }: { children: ReactNode }) {
       seen.add(key);
       const text = r.ok ? r.text : `"${r.name}" couldn't run. Open Settings, Reminders for details.`;
       // An alarm rings until it's stopped; its wake-up line is said after.
-      if (/^Alarm/.test(r.name)) {
+      if (isAlarm(r.name)) {
         ringAlarm({ name: r.name, text });
         return;
       }

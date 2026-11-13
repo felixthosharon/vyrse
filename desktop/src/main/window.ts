@@ -1,4 +1,4 @@
-import { BrowserWindow, shell } from 'electron'
+import { app, BrowserWindow, shell } from 'electron'
 import path from 'node:path'
 
 /**
@@ -26,7 +26,13 @@ export function createMainWindow(rendererUrl: string | undefined, rendererIndex:
     },
   })
 
-  win.once('ready-to-show', () => win.show())
+  // Developer UI checks can run without a window appearing on screen (never in the installed app).
+  const offscreen = !app.isPackaged && process.env.VYRSE_SMOKE_HIDDEN === '1'
+  win.once('ready-to-show', () => {
+    if (!offscreen) return win.show()
+    win.setPosition(-6000, -6000)
+    win.showInactive()
+  })
 
   // Voice needs the microphone; nothing else (camera, geolocation, notifications, clipboard…) is granted.
   // Copy buttons write through the main process instead (desktop.copyText).

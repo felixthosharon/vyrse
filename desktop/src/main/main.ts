@@ -7,6 +7,7 @@ import { installGuards } from './guard'
 import { registerBackendIpc } from './ipc'
 import { captureWindow, driveUi, runScript, runSmoke } from './smoke'
 import { attachTalkShortcut } from './hotkey'
+import { attachExtras } from './extras'
 import { attachDictation } from './dictation'
 import { attachAlexa } from './alexa'
 import { attachEchoSkill } from './alexa-skill'
@@ -83,6 +84,7 @@ async function main(): Promise<void> {
     attachEchoSkill(win)
     attachQuickAsk(win, rendererUrl, rendererIndex)
     attachPhoneBridge(win, backend)
+    attachExtras(win)
     win.webContents.on('console-message', d => {
       if (d.level === 'warning' || d.level === 'error' || d.message.startsWith('[vyrse:voice]'))
         console.log(`[smoke] renderer ${d.level}: ${d.message}`)
@@ -128,6 +130,7 @@ async function main(): Promise<void> {
     attachQuickAsk(mainWindow, rendererUrl, rendererIndex)
     attachPhoneBridge(mainWindow, backend)
     attachOverlay(mainWindow, rendererUrl, rendererIndex, backend)
+    attachExtras(mainWindow)
   }
 
   void backend.start()

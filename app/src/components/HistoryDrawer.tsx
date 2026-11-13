@@ -4,6 +4,7 @@ import { useVyrse } from "@/lib/vyrse/store";
 import { groupHistory, relativeTime } from "@/lib/vyrse/mock-history";
 import { cn } from "@/lib/utils";
 import { IS_PHONE } from "@/services/phone";
+import { getVyrseApi } from "@/services";
 
 export function HistoryDrawer() {
   const {
@@ -46,14 +47,36 @@ export function HistoryDrawer() {
     return () => window.clearTimeout(t);
   }, [historyOpen]);
 
+  // Search looks inside the conversations too, not only at their names (Hermes' full-text index).
+  const [hits, setHits] = useState<Map<string, string>>(new Map());
+  useEffect(() => {
+    const q = query.trim();
+    const search = getVyrseApi().conversations?.search;
+    if (!historyOpen || q.length < 2 || !search) {
+      setHits((h) => (h.size ? new Map() : h));
+      return;
+    }
+    let stale = false;
+    const t = window.setTimeout(() => {
+      search(q)
+        .then((found) => !stale && setHits(new Map(found.map((f) => [f.id, f.snippet]))))
+        .catch(() => !stale && setHits(new Map()));
+    }, 220);
+    return () => {
+      stale = true;
+      window.clearTimeout(t);
+    };
+  }, [query, historyOpen]);
+
   const groups = useMemo(() => {
     if (!listShown) return [];
+    const q = query.trim().toLowerCase();
     const filtered = conversations
       .filter((c) => c.messages.length > 0 || c.title !== "New conversation")
-      .filter((c) => c.title.toLowerCase().includes(query.trim().toLowerCase()))
+      .filter((c) => !q || c.title.toLowerCase().includes(q) || hits.has(c.id))
       .sort((a, b) => b.updatedAt - a.updatedAt);
     return groupHistory(filtered);
-  }, [conversations, query, listShown]);
+  }, [conversations, query, listShown, hits]);
 
   return (
     <>
@@ -92,7 +115,7 @@ export function HistoryDrawer() {
               ref={search}
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              placeholder={IS_PHONE ? "Search conversations" : "Search conversations  (Ctrl+K)"}
+              placeholder="Search your conversations"
               className="min-w-0 flex-1 bg-transparent text-[13.5px] text-foreground placeholder:text-muted-foreground/70 focus:outline-none"
             />
           </div>
@@ -169,6 +192,9 @@ export function HistoryDrawer() {
                           />
                           <span className="truncate text-[13.5px] text-foreground">{c.title}</span>
                         </span>
+                        {query.trim() && hits.get(c.id) && !c.title.toLowerCase().includes(query.trim().toLowerCase()) && (
+                          <span data-hit className="mt-0.5 block truncate pl-3.5 text-[11px] text-muted-foreground">{hits.get(c.id)}</span>
+                        )}
                         <span className="mt-0.5 block pl-3.5 font-mono text-[10.5px] text-muted-foreground/80">
                           {relativeTime(c.updatedAt)}
                         </span>

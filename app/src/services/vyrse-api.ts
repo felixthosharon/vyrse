@@ -114,6 +114,44 @@ export interface ModelChoice {
 
 export type ReasoningLevel = "none" | "low" | "medium" | "high";
 
+/** An online AI account the user can connect (their own subscription or API key). */
+export interface AiAccount {
+  id: string;
+  label: string;
+  blurb: string;
+  /** "key": paste an API key · "signin": sign in on the provider's page */
+  kind: "key" | "signin";
+  connected: boolean;
+  keyUrl?: string;
+  keyHint?: string;
+  /** the saved key, masked (never the key itself) */
+  keyPreview?: string;
+  /** connected by a sign-in made outside VYRSE; nothing to remove here */
+  managedElsewhere?: boolean;
+}
+
+export interface SignInSession {
+  id: string;
+  session: string;
+  /** the short code to type on the provider's page */
+  code: string;
+  url: string;
+  expiresAt: number;
+  pollMs: number;
+}
+
+export type SignInStatus = { state: "waiting" } | { state: "done" } | { state: "failed"; message: string };
+
+/** Connecting online AI accounts. Keys and tokens go straight to the backend; the UI never keeps them. */
+export interface AiAccountsApi {
+  list(): Promise<AiAccount[]>;
+  saveKey(id: string, key: string): Promise<{ ok: boolean; message?: string }>;
+  disconnect(id: string): Promise<void>;
+  startSignIn(id: string): Promise<SignInSession>;
+  pollSignIn(session: SignInSession): Promise<SignInStatus>;
+  cancelSignIn(session: SignInSession): Promise<void>;
+}
+
 /** Agent settings owned by Hermes (VYRSE only displays and edits them). */
 export interface AgentSettings {
   model: string;
@@ -271,6 +309,8 @@ export interface VyrseApi {
     /** Drops the last exchange from the backend's history (retry / edit last message). */
     undo?(id: string): Promise<number>;
     delete(id: string): Promise<void>;
+    /** Conversations whose messages mention `query`, with the matching line. */
+    search?(query: string): Promise<{ id: string; snippet: string }[]>;
     /** Fires when the backend's session list changed (title set, new session, deletion). */
     onChanged(callback: () => void): () => void;
   };
@@ -293,6 +333,9 @@ export interface VyrseApi {
     /** Fires when Hermes reports the active model changed (any client, any cause). */
     onModelChanged(callback: (model: { model: string; provider: string }) => void): () => void;
   };
+
+  /** Online AI accounts (desktop only: keys are entered on the PC that keeps them). */
+  accounts?: AiAccountsApi;
 
   /** Interface control by Hermes and the shared interface-preference store (vyrse plugin). */
   ui?: {

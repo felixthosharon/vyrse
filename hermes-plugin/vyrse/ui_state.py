@@ -34,7 +34,7 @@ CHOICES: Dict[str, Tuple[str, ...]] = {
     "accent": ("cyan", "violet", "ember", "mint", "rose"),
 }
 BOOLEANS = ("voiceResponses", "voiceActivation", "autoListen", "reducedMotion", "highContrast", "keyboardNav",
-            "speakTyped", "autoGain", "clipboardMemory", "ghostHands")
+            "speakTyped", "autoGain", "clipboardMemory", "ghostHands", "updateCheck")
 NUMBERS: Dict[str, Tuple[float, float]] = {"textSize": (0.9, 1.25), "micSensitivity": (0.1, 1.2), "volume": (0.0, 1.0)}
 STRINGS = ("micDevice", "outputDevice", "userName", "briefingGames")
 

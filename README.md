@@ -5,7 +5,7 @@
 **A voice-first AI assistant that lives on your own PC.** Say "VYRSE" and talk: it answers out loud, runs
 your PC, works from your Android phone (and can operate it), and even takes questions from an Amazon Echo.
 The AI runs locally on your GPU through [Hermes Agent](https://github.com/NousResearch/hermes-agent):
-your conversations, memory and voice never leave your machine unless you choose an online model.
+your conversations, memory and voice never leave your machine unless you connect an online model.
 
 > VYRSE is the interface. Hermes Agent is the brain (models, tools, memory, skills, approvals). VYRSE
 > doesn't reimplement any of that; it's the window, the voice, the phone app and the extras.
@@ -20,6 +20,8 @@ your conversations, memory and voice never leave your machine unless you choose 
   fully operate it: tap, type, open apps.
 - **Echo / Alexa (optional).** "Alexa, ask my PC..." sends the question to VYRSE; VYRSE can make the Echo speak
   or run Alexa commands.
+- **Bring your own AI (optional).** *Settings → AI models* connects a ChatGPT Plus/Pro subscription (sign in), or a
+  Claude, Gemini, OpenAI, OpenRouter or Grok API key (paste it). Switch between those and the model on your PC any time.
 - **Talk styles.** Normal, Vibe, Fam, Chill, Hype, Focus, Pro and Savage (it roasts you, then still does the job).
 - **Liquid-glass interface** with a live animated presence, workspace panel for charts and tables, settings
   search, light and dark themes.
@@ -27,7 +29,7 @@ your conversations, memory and voice never leave your machine unless you choose 
 ## Requirements
 - **Windows 10/11** (64-bit).
 - **For local AI:** an NVIDIA GPU with 8 GB+ of memory is recommended (6 GB works with smaller models). Without
-  one, use an online model through Hermes, or a small model on the CPU (slow).
+  one, connect an online AI account in *Settings → AI models*, or run a small model on the CPU (slow).
 - 16 GB RAM, ~15 GB free disk (a model is 5-8 GB).
 - **Android 8+** for the phone app (optional).
 
@@ -41,9 +43,11 @@ your conversations, memory and voice never leave your machine unless you choose 
    installs the voice libraries, downloads and verifies the Kokoro voice model (about 350 MB), installs the wake
    word and VYRSE's skills, and sets the Hermes options VYRSE needs. It takes a few minutes and needs
    [Git for Windows](https://git-scm.com). After an update, VYRSE repeats this by itself.
-4. **Add an AI model**, either way:
+4. **Add an AI model**, any of these:
+   - drop a `.gguf` file into `%USERPROFILE%\VYRSE\models` (its `README.md` says what fits your GPU), or
    - run `hermes model` and pick a local model (Hermes downloads it), or
-   - drop a `.gguf` file into `%USERPROFILE%\VYRSE\models` (its `README.md` says what fits your GPU).
+   - open *Settings → AI models* in VYRSE and connect an account you already have: sign in with ChatGPT, or paste
+     a Claude, Gemini, OpenAI, OpenRouter or Grok API key. Your messages then go to that company.
 5. **Talk to it.** On first run VYRSE asks your name. Then say "VYRSE".
 
 Building from source instead? Clone this repo and run the same setup yourself; your models then go in the repo's
@@ -97,7 +101,8 @@ VYRSE desktop (Electron)                         Hermes Agent (Python, on this P
 | `models/` | Put your `.gguf` models here. |
 
 ## Privacy and security
-Everything runs on your PC. The phone connects over your home Wi-Fi only, with a per-phone key; the Echo
+Everything runs on your PC, unless you connect an online AI account: then your messages go to that company, and its
+key or sign-in is kept by Hermes on this PC. The phone connects over your home Wi-Fi only, with a per-phone key; the Echo
 gateway (off by default) accepts only verified Amazon requests for your own skill. Risky actions ask first.
 Details: [SECURITY.md](SECURITY.md).
 

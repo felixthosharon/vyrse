@@ -71,7 +71,18 @@ export const IPC_CHANNELS = {
   overlayStop: 'vyrse:overlay-stop',
   overlayClicked: 'vyrse:overlay-clicked',
   snap: 'vyrse:snap',
+  appInfo: 'vyrse:app-info',
+  savePaste: 'vyrse:save-paste',
 } as const
+
+/** This app's version and, after a check, the newest published release. */
+export interface AppInfo {
+  version: string
+  releasesUrl: string
+  latest?: string
+  newer?: boolean
+  error?: string
+}
 
 /**
  * What VYRSE draws over the screen (main/overlay.ts): a ring around a real control ("show me where"), the ghost
@@ -194,6 +205,10 @@ export interface VyrseBridge {
     onOverlayClicked(callback: () => void): () => void
     /** a photo the phone snapped for the PC */
     onSnap(callback: (photo: SnapPhoto) => void): () => void
+    /** this app's version; `check` also asks GitHub for the newest release */
+    appInfo(check?: boolean): Promise<AppInfo | null>
+    /** save a picture pasted from the clipboard; returns its path (null = not a picture VYRSE takes) */
+    savePaste(mime: string, bytes: Uint8Array): Promise<string | null>
   }
   /** overlay windows */
   overlayPage: {

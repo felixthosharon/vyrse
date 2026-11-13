@@ -234,6 +234,8 @@ export interface Settings {
   clipboardMemory?: boolean;
   /** a glowing cursor shows where VYRSE is clicking/typing while it drives an app (Esc stops it) */
   ghostHands?: boolean;
+  /** ask GitHub at start whether a newer VYRSE is out (desktop) */
+  updateCheck?: boolean;
   /** soft interface sounds (a card built, a step ticked, a timer done) */
   uiSounds: boolean;
   /** let the OS/browser boost quiet microphones */

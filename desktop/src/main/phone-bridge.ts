@@ -141,6 +141,7 @@ const PHONE_REST: { method: string; path: RegExp }[] = [
   { method: 'GET', path: /^\/api\/status$/ },
   { method: '*', path: /^\/api\/config$/ },
   { method: 'GET', path: /^\/api\/memory$/ },
+  { method: 'GET', path: /^\/api\/sessions\/search$/ },
   { method: 'POST', path: /^\/api\/audio\/(transcribe|stt-lease|tts-lease)$/ },
   { method: '*', path: /^\/api\/local-models\/(status|eject)$/ },
   { method: '*', path: /^\/api\/plugins\/vyrse\/[\w./%-]+$/ },

@@ -40,6 +40,16 @@ export class HermesSessions {
     return (result.sessions ?? []).map(toSummary);
   }
 
+  /** Conversations whose messages mention `query` (Hermes' full-text index), with the matching line. */
+  async search(query: string): Promise<{ id: string; snippet: string }[]> {
+    const res = await this.gateway.rest<{ results?: { id?: string; session_id?: string; snippet?: string }[] }>(
+      `/api/sessions/search?limit=40&q=${encodeURIComponent(query)}`,
+    );
+    return (res.results ?? [])
+      .map((r) => ({ id: r.id ?? r.session_id ?? "", snippet: (r.snippet ?? "").replace(/>>>|<<<|<\/?mark>|<\/?b>/g, "").replace(/\s+/g, " ").trim() }))
+      .filter((r) => r.id);
+  }
+
   /** the model picked in VYRSE, if known (set by the API facade); new conversations start on it */
   selectedModel: () => { model: string; provider: string } | null = () => null;
 

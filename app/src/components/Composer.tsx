@@ -93,6 +93,41 @@ export function Composer({ compact = false }: { compact?: boolean }) {
   const busyRef = useRef(busy);
   busyRef.current = busy;
 
+  const addFiles = (added: { path: string; name: string }[]) => {
+    if (!added.length) return;
+    setFiles((prev) => [...prev, ...added.filter((a) => !prev.some((p) => p.path === a.path))].slice(0, 8));
+    ref.current?.focus();
+  };
+
+  // The paperclip: pick files the usual way (the desktop app; the phone sends photos with the camera button).
+  const picker = useRef<HTMLInputElement>(null);
+  const canAttach = !IS_PHONE && Boolean(getDesktopBridge()?.desktop);
+  const pick = (list: FileList | null) => {
+    const desktop = getDesktopBridge()?.desktop;
+    if (!desktop || !list) return;
+    addFiles(Array.from(list).map((f) => ({ path: desktop.pathForFile(f), name: f.name })).filter((f) => f.path));
+  };
+
+  // Paste: files copied in Explorer attach as they are; a copied picture (a screenshot) is saved first.
+  const onPaste = (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    const desktop = getDesktopBridge()?.desktop;
+    const pasted = Array.from(e.clipboardData?.files ?? []);
+    if (!desktop || !pasted.length) return; // plain text pastes as usual
+    e.preventDefault();
+    void (async () => {
+      const added: { path: string; name: string }[] = [];
+      for (const f of pasted) {
+        let path = desktop.pathForFile(f);
+        if (!path && f.type.startsWith("image/") && desktop.savePaste) {
+          path = (await desktop.savePaste(f.type, new Uint8Array(await f.arrayBuffer()))) ?? "";
+        }
+        if (path) added.push({ path, name: f.name && f.name !== "image.png" ? f.name : "Pasted picture" });
+      }
+      if (added.length) addFiles(added);
+      else notify("VYRSE couldn't attach that. Try dragging the file in.");
+    })();
+  };
+
   // Phone: snap a photo for the PC to look at (homework, a receipt, a whiteboard, a menu, a product…).
   const camera = useRef<HTMLInputElement>(null);
   const snap = async (file: File | undefined) => {
@@ -201,9 +236,33 @@ export function Composer({ compact = false }: { compact?: boolean }) {
             </button>
           </>
         )}
+        {canAttach && (
+          <>
+            <input
+              ref={picker}
+              type="file"
+              multiple
+              className="hidden"
+              onChange={(e) => {
+                pick(e.target.files);
+                e.target.value = "";
+              }}
+            />
+            <button
+              type="button"
+              onClick={() => picker.current?.click()}
+              aria-label="Attach files"
+              title="Attach files (or paste, or drop them in)"
+              className="grid size-8 shrink-0 place-items-center self-end rounded-full text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none"
+            >
+              <Paperclip className="size-[17px]" strokeWidth={1.6} />
+            </button>
+          </>
+        )}
         <textarea
           data-composer
           ref={ref}
+          onPaste={onPaste}
           rows={1}
           value={value}
           disabled={busy}
@@ -227,7 +286,7 @@ export function Composer({ compact = false }: { compact?: boolean }) {
                   ? "Add a message, or just send"
                   : IS_PHONE
                     ? "Message VYRSE"
-                    : "Type instead · drop files to attach"
+                    : "Type instead · paste or drop files to attach"
           }
           className="max-h-[132px] min-h-[2rem] flex-1 resize-none self-center bg-transparent py-[0.4rem] text-[14.5px] leading-relaxed text-foreground [mask-image:linear-gradient(to_bottom,transparent,#000_0.4rem,#000_calc(100%-0.4rem),transparent)] placeholder:text-muted-foreground/60 focus:outline-none disabled:opacity-60"
         />

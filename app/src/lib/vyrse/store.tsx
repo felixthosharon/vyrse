@@ -53,6 +53,8 @@ interface VyrseContextValue {
   /** Hermes-owned agent settings; null until Hermes is connected */
   agent: AgentSettings | null;
   setModel: (choice: ModelChoice) => void;
+  /** re-read Hermes' models and settings (after an AI account was connected or removed) */
+  refreshAgent: () => Promise<void>;
   setReasoning: (level: ReasoningLevel) => void;
   setApprovalMode: (mode: AgentSettings["approvalMode"]) => void;
   setMemoryEnabled: (enabled: boolean) => void;
@@ -1537,6 +1539,7 @@ export function VyrseProvider({ children }: { children: ReactNode }) {
     setupBackend: useCallback(() => void (api.link?.setup ?? api.link?.restart)?.(), [api]),
     agent: state.agent,
     setModel,
+    refreshAgent: loadAgent,
     setReasoning,
     setApprovalMode,
     setMemoryEnabled,

@@ -8,7 +8,8 @@ import {
   Brain,
   ChevronLeft,
   ChevronRight,
-  Cloud,
+  Cpu,
+  Info,
   Mic2,
   Palette,
   Puzzle,
@@ -24,6 +25,8 @@ import { RemindersSection } from "./settings/RemindersSection";
 import { AlexaSection } from "./settings/AlexaSection";
 import { PhoneSection } from "./settings/PhoneSection";
 import { SkillsSection } from "./settings/SkillsSection";
+import { ModelsSection } from "./settings/ModelsSection";
+import { AboutSection, useUpdateNotice } from "./settings/AboutSection";
 import { VoiceSection } from "./settings/VoiceSection";
 import { searchSettings, type SettingEntry } from "./settings/search-index";
 import { useVyrse } from "@/lib/vyrse/store";
@@ -32,7 +35,7 @@ import { TALK_STYLES, type TalkStyle } from "@/lib/vyrse/talk-styles";
 import { cn } from "@/lib/utils";
 import { IS_PHONE } from "@/services/phone";
 
-type PageId = "assistant" | "voice" | "memory" | "reminders" | "alexa" | "phone" | "skills" | "appearance";
+type PageId = "assistant" | "models" | "voice" | "memory" | "reminders" | "alexa" | "phone" | "skills" | "appearance" | "about";
 
 interface PageDef {
   id: PageId;
@@ -46,6 +49,7 @@ const GROUPS: { title: string; pages: PageDef[] }[] = [
     title: "VYRSE",
     pages: [
       { id: "assistant", label: "Assistant", icon: Sparkles },
+      { id: "models", label: "AI models", icon: Cpu },
       { id: "voice", label: "Voice", icon: AudioLines },
       { id: "memory", label: "Memory & privacy", icon: Brain },
     ],
@@ -64,6 +68,7 @@ const GROUPS: { title: string; pages: PageDef[] }[] = [
     pages: [
       { id: "skills", label: "Skills", icon: Puzzle },
       { id: "appearance", label: "Appearance", icon: Palette },
+      { id: "about", label: "About", icon: Info },
     ],
   },
 ];
@@ -77,10 +82,11 @@ export const settingsBack: { current: (() => boolean) | null } = { current: null
 export function SettingsPanel() {
   const {
     settingsOpen, setSettingsOpen, settings: s, setSettings, micLive, link, restartBackend,
-    agent, setModel, setReasoning, setApprovalMode, setMemoryEnabled, setMode, setTalkStyle, phoneWake, startNew, send,
+    agent, setReasoning, setApprovalMode, setMemoryEnabled, setMode, setTalkStyle, phoneWake, startNew, send,
   } = useVyrse();
   const set = <K extends keyof Settings>(k: K, v: Settings[K]) => setSettings({ [k]: v } as Partial<Settings>);
   const [page, setPage] = useState<PageId | null>(null);
+  useUpdateNotice();
   // The page being shown stays mounted while it slides back out.
   const [shown, setShown] = useState<PageId | null>(null);
   const scrollers = useRef(new Map<PageId, HTMLDivElement>());
@@ -203,14 +209,15 @@ export function SettingsPanel() {
     return () => window.removeEventListener("keydown", onKey, true);
   }, [settingsOpen, page]);
 
-  const localModels = agent?.models.filter((m) => m.local) ?? [];
-  const onlineModels = s.mode === "private" ? [] : (agent?.models.filter((m) => !m.local) ?? []);
-  const current = agent ? `${agent.provider}::${agent.model}` : "";
-  const known = agent?.models.some((m) => `${m.provider}::${m.model}` === current);
+  const currentModel = agent?.models.find((m) => m.model === agent.model && m.provider === agent.provider);
+  const onlineCount = s.mode === "private" ? 0 : (agent?.models.filter((m) => !m.local).length ?? 0);
   const styleLabel = TALK_STYLES.find((t) => t.id === s.talkStyle)?.label ?? s.customStyles?.find((t) => t.id === s.talkStyle)?.label ?? "Normal";
 
   const summary: Record<PageId, string> = {
-    assistant: [styleLabel, agent?.model, s.mode !== "assistant" ? s.mode : null].filter(Boolean).join(" · "),
+    assistant: [styleLabel, s.mode !== "assistant" ? `${s.mode} mode` : null, s.briefing && s.briefing !== "off" ? "daily briefing" : null].filter(Boolean).join(" · "),
+    models: agent
+      ? [agent.model || "No model yet", currentModel && !currentModel.local ? "online" : "on your PC", onlineCount ? `${onlineCount} online ready` : null].filter(Boolean).join(" · ")
+      : "Local models and your own AI accounts",
     voice: IS_PHONE
       ? `${phoneWake ? "Wake word on" : "Tap to talk"} · voice replies ${s.voiceResponses ? "on" : "off"}`
       : [s.voiceActivation ? "Wake word on" : "Wake word off", s.voiceResponses ? "voice replies on" : "voice replies off"].join(" · "),
@@ -219,6 +226,7 @@ export function SettingsPanel() {
     alexa: "Your Echo speaks and answers for VYRSE",
     phone: IS_PHONE ? "Connected to your PC" : "Use VYRSE on your Android phone",
     skills: "Add-on know-how Hermes can use",
+    about: "Version, updates and the project",
     appearance: `${s.theme === "system" ? "System" : s.theme === "dark" ? "Dark" : "Light"} theme · ${s.glass === "off" ? "no glass" : `${s.glass ?? "liquid"} glass`}`,
   };
 
@@ -278,32 +286,6 @@ export function SettingsPanel() {
                 <Row label="Mode" hint={s.mode === "gaming" ? "GPU freed" : s.mode === "private" ? "local only" : undefined}>
                   <Segmented value={s.mode} onChange={setMode} options={[{ value: "assistant", label: "Assistant" }, { value: "private", label: "Private" }, { value: "gaming", label: "Gaming" }]} />
                 </Row>
-                <Row label="Model" hint={onlineModels.some((m) => `${m.provider}::${m.model}` === current) ? "online" : "on your PC"}>
-                  <Dropdown
-                    value={current}
-                    onChange={(v) => {
-                      const m = agent.models.find((x) => `${x.provider}::${x.model}` === v);
-                      if (m) setModel(m);
-                    }}
-                    label="Model"
-                    options={[
-                      ...(known ? [] : [{ value: current, label: agent.model, hint: agent.provider }]),
-                      ...localModels.map((m) => ({ value: `${m.provider}::${m.model}`, label: m.model, hint: "runs on your PC" })),
-                      ...onlineModels.map((m) => ({ value: `${m.provider}::${m.model}`, label: m.model, hint: `${m.providerLabel} · online` })),
-                    ]}
-                  />
-                </Row>
-                {onlineModels.length === 0 && !IS_PHONE && (
-                  <div className="flex items-start gap-2.5 rounded-2xl border border-dashed border-border/80 px-3 py-2.5">
-                    <Cloud className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" strokeWidth={1.6} />
-                    <p className="text-[10.5px] leading-relaxed text-muted-foreground">
-                      <span className="text-foreground">Online models — not connected.</span> VYRSE runs fully on this PC. To add an
-                      online provider later, run <span className="font-mono">hermes model</span> in a terminal; it will appear here.
-                      New local models: drop a <span className="font-mono">.gguf</span> into{" "}
-                      {agent?.modelsDir ? <span className="break-all font-mono">{agent.modelsDir}</span> : "your VYRSE models folder"}.
-                    </p>
-                  </div>
-                )}
                 <Row label="Reasoning when typing" hint="more = slower, more careful">
                   <Segmented value={agent.reasoning} onChange={setReasoning} options={[{ value: "none", label: "Off" }, { value: "low", label: "Low" }, { value: "medium", label: "Medium" }, { value: "high", label: "High" }]} />
                 </Row>
@@ -320,6 +302,8 @@ export function SettingsPanel() {
             </div>
           </Section>
         );
+      case "models":
+        return <ModelsSection open={settingsOpen} />;
       case "voice":
         return <VoiceSection />;
       case "memory":
@@ -347,6 +331,8 @@ export function SettingsPanel() {
         return <PhoneSection />;
       case "skills":
         return <SkillsSection open={settingsOpen} />;
+      case "about":
+        return <AboutSection open={settingsOpen} />;
       case "appearance":
         return (
           <>

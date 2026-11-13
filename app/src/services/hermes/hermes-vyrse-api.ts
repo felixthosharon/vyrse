@@ -3,6 +3,8 @@ import { HermesApprovals } from "./approvals";
 import { HermesClarify } from "./clarify";
 import type { VyrseBridge } from "./bridge";
 import { HermesGateway } from "./gateway";
+import { HermesProviders } from "./providers";
+import { IS_PHONE } from "../phone";
 import { HermesSessions } from "./sessions";
 import { HermesSettings } from "./settings";
 import { HermesSkills } from "./skills";
@@ -27,6 +29,7 @@ export function createHermesVyrseApi(bridge: VyrseBridge): VyrseApi & { gateway:
   const skills = new HermesSkills(gateway);
   const voice = new HermesVoice(gateway);
   const reminders = new HermesReminders(gateway);
+  const accounts = new HermesProviders(gateway);
 
   async function* stream(req: TurnRequest, signal: AbortSignal): AsyncGenerator<StreamEvent> {
     if (!gateway.online) {
@@ -110,6 +113,7 @@ export function createHermesVyrseApi(bridge: VyrseBridge): VyrseApi & { gateway:
       rename: (id, title) => sessions.rename(id, title),
       undo: (id) => sessions.undo(id),
       delete: (id) => sessions.delete(id),
+      search: (query) => sessions.search(query),
       onChanged: (callback) => {
         const offs = [gateway.on("sessions.changed", callback), gateway.on("session.title", callback)];
         return () => offs.forEach((off) => off());
@@ -157,6 +161,7 @@ export function createHermesVyrseApi(bridge: VyrseBridge): VyrseApi & { gateway:
       updateWorkspaceItem: (conversationId, id, update) => ui.updateWorkspaceItem(conversationId, id, update),
       fileIndex: (refresh) => ui.fileIndex(refresh),
     },
+    ...(IS_PHONE ? {} : { accounts }),
     voice,
     reminders: {
       list: () => reminders.list(),

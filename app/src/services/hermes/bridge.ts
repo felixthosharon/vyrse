@@ -69,7 +69,19 @@ export interface VyrseBridge {
     onOverlayClicked?(callback: () => void): () => void;
     /** a photo the phone snapped for the PC */
     onSnap?(callback: (photo: { dataUrl: string; path: string; from: string }) => void): () => void;
+    /** this app's version; `check` also asks GitHub for the newest release */
+    appInfo?(check?: boolean): Promise<AppInfo | null>;
+    /** save a picture pasted from the clipboard; returns its path */
+    savePaste?(mime: string, bytes: Uint8Array): Promise<string | null>;
   };
+}
+
+export interface AppInfo {
+  version: string;
+  releasesUrl: string;
+  latest?: string;
+  newer?: boolean;
+  error?: string;
 }
 
 /** Mirrors OverlayMessage in desktop/src/shared/backend-types.ts. `rect` is in physical screen pixels. */

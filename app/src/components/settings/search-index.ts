@@ -1,6 +1,6 @@
 import { IS_PHONE } from "@/services/phone";
 
-export type SettingsPage = "assistant" | "voice" | "memory" | "reminders" | "alexa" | "phone" | "skills" | "appearance";
+export type SettingsPage = "assistant" | "models" | "voice" | "memory" | "reminders" | "alexa" | "phone" | "skills" | "appearance" | "about";
 
 /** One searchable setting: `label` is the row's exact on-screen label (used to scroll to it). */
 export interface SettingEntry {
@@ -17,7 +17,8 @@ const ALL: SettingEntry[] = [
   { label: "Talk style", page: "assistant", keywords: "personality vibe fam slang tone chill hype focus pro normal" },
   { label: "Daily briefing", page: "assistant", keywords: "good morning news weather briefing schedule" },
   { label: "Mode", page: "assistant", keywords: "private gaming assistant offline gpu" },
-  { label: "Model", page: "assistant", keywords: "llm qwen gemma ai brain local online" },
+  { label: "Answering now", page: "models", keywords: "model llm qwen gemma ai brain local online switch" },
+  { label: "Your AI accounts", page: "models", keywords: "chatgpt claude gpt openai gemini grok openrouter api key subscription online connect sign in account login" },
   { label: "Reasoning when typing", page: "assistant", keywords: "thinking effort slow careful" },
   { label: "Approvals", page: "assistant", keywords: "permission ask risky safety autonomy" },
   { label: "Wake word “VYRSE”", page: "voice", keywords: "hey wake listen always hotword" },
@@ -56,6 +57,8 @@ const ALL: SettingEntry[] = [
   { label: "Reduced motion", page: "appearance", keywords: "accessibility motion sickness" },
   { label: "High contrast", page: "appearance", keywords: "accessibility contrast readability" },
   { label: "Text size", page: "appearance", keywords: "font size bigger smaller zoom accessibility" },
+  { label: "Check for updates", page: "about", keywords: "version update new release upgrade latest about", pc: true },
+  { label: "Tell me about new versions", page: "about", keywords: "update notification automatic check", pc: true },
 ];
 
 export const SETTINGS_INDEX = ALL.filter((e) => (IS_PHONE ? !e.pc : !e.phone));

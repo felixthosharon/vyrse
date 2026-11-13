@@ -164,7 +164,7 @@ export function friendlyError(p: MessageCompletePayload): string {
     return "That model isn't available anymore (was its file moved or deleted?). Pick another one in Settings → Assistant → Model.";
   // A fresh install: Hermes has no model or provider yet.
   if (/not connected to any AI provider|no default model|no inference provider|no model configured/i.test(detail))
-    return "VYRSE has no AI model yet. Run `hermes model` in a terminal to pick one, or put a .gguf model file in your VYRSE models folder, then ask again.";
+    return "VYRSE has no AI model yet. Open Settings → AI models to connect your ChatGPT, Claude or Gemini account, or put a .gguf model file in your VYRSE models folder, then ask again.";
   if (/context/i.test(code)) return "That conversation got too long for the model. Start a new one or try again.";
   if (/rate|quota|429/i.test(code)) return "The model provider is rate-limiting requests. Try again shortly.";
   if (/auth|401|403|key/i.test(code)) return "The model provider rejected the credentials. Check the model settings.";

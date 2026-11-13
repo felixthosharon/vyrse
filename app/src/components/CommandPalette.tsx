@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ArrowRight, Captions, History, Mic, Moon, PanelRight, Plus, Settings2, Sparkles, Sun, Trash2, UserRound, Wand2 } from "lucide-react";
+import { ArrowRight, Captions, Cpu, History, Mic, Moon, PanelRight, Plus, Settings2, Sparkles, Sun, Trash2, UserRound, Wand2 } from "lucide-react";
 import { useVyrse } from "@/lib/vyrse/store";
 import { IS_PHONE } from "@/services/phone";
 import { TALK_STYLES } from "@/lib/vyrse/talk-styles";
@@ -63,6 +63,11 @@ export function CommandPalette() {
       ...TALK_STYLES.map((t) => ({ id: `style-${t.id}`, label: `Talk style: ${t.label}`, hint: t.hint, icon: Wand2, keywords: "personality tone", run: () => v.setTalkStyle(t.id) })),
       ...(v.settings.customStyles ?? []).map((t) => ({ id: `style-${t.id}`, label: `Talk style: ${t.label}`, hint: t.hint || "your style", icon: Wand2, keywords: "personality tone custom", run: () => v.setTalkStyle(t.id) })),
       { id: "style-new", label: "Make my own talk style", icon: Wand2, keywords: "custom personality create", run: () => v.send("I want to make my own talk style. Ask me how it should talk, then create it.") },
+      { id: "accounts", label: "Connect ChatGPT, Claude or Gemini", icon: Cpu, keywords: "ai account api key subscription online model openai anthropic google", run: () => { v.setSettingsOpen(true); window.setTimeout(() => openSettingsPage("models"), 50); } },
+      ...(v.agent?.models ?? [])
+        .filter((m) => m.local || v.settings.mode !== "private")
+        .filter((m) => !(m.model === v.agent?.model && m.provider === v.agent?.provider))
+        .map((m) => ({ id: `model-${m.provider}-${m.model}`, label: `Model: ${m.model}`, hint: m.local ? "on your PC" : m.providerLabel, icon: Cpu, keywords: "switch ai llm brain", run: () => v.setModel(m) })),
       ...(["assistant", "private", "gaming"] as const).map((m) => ({ id: `mode-${m}`, label: `Mode: ${m[0]!.toUpperCase()}${m.slice(1)}`, icon: Sparkles, keywords: "offline gpu", run: () => v.setMode(m) })),
       ...SETTINGS_INDEX.map((s) => ({
         id: `set-${s.label}`,

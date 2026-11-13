@@ -1,6 +1,6 @@
 import { contextBridge, ipcRenderer, webUtils, type IpcRendererEvent } from 'electron'
 
-import type { AlexaStatus, EchoSkillStatus, OverlayMessage, PhoneBridgeStatus, SnapPhoto, QuickUpdate, BackendConnection, BackendStatus, OrbState, VyrseBridge } from '../shared/backend-types'
+import type { AppInfo, AlexaStatus, EchoSkillStatus, OverlayMessage, PhoneBridgeStatus, SnapPhoto, QuickUpdate, BackendConnection, BackendStatus, OrbState, VyrseBridge } from '../shared/backend-types'
 
 // Sandboxed preloads cannot require local modules, so channel names are inlined
 // here; they must match IPC_CHANNELS in shared/backend-types.ts.
@@ -44,6 +44,8 @@ const CH = {
   overlayStop: 'vyrse:overlay-stop',
   overlayClicked: 'vyrse:overlay-clicked',
   snap: 'vyrse:snap',
+  appInfo: 'vyrse:app-info',
+  savePaste: 'vyrse:save-paste',
 } as const
 
 const bridge: VyrseBridge = {
@@ -129,6 +131,8 @@ const bridge: VyrseBridge = {
       ipcRenderer.on(CH.snap, listener)
       return () => ipcRenderer.removeListener(CH.snap, listener)
     },
+    appInfo: check => ipcRenderer.invoke(CH.appInfo, check === true) as Promise<AppInfo | null>,
+    savePaste: (mime, bytes) => ipcRenderer.invoke(CH.savePaste, mime, bytes) as Promise<string | null>,
   },
   overlayPage: {
     onShow(callback) {

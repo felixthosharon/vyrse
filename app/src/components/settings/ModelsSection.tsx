@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useState } from "react";
-import { Check, Cloud, Cpu, ExternalLink, Loader2 } from "lucide-react";
+import { Check, Cloud, ExternalLink, Loader2 } from "lucide-react";
 import { getVyrseApi } from "@/services";
 import type { AiAccount, ModelChoice, SignInSession } from "@/services";
 import { useVyrse } from "@/lib/vyrse/store";
 import { copyText } from "@/lib/clipboard";
 import { Dropdown, Row, Section } from "./controls";
+import { LocalModels } from "./LocalModels";
 
 const key = (m: { provider: string; model: string }) => `${m.provider}::${m.model}`;
 
@@ -150,20 +151,12 @@ export function ModelsSection({ open }: { open: boolean }) {
             label="Model"
             options={[
               ...(known ? [] : [{ value: current, label: agent.model || "No model yet", hint: agent.provider }]),
-              ...local.map((m) => ({ value: key(m), label: m.model, hint: "runs on your PC · private · free" })),
+              ...local.map((m) => ({ value: key(m), label: m.model, hint: "on your PC · private · free" })),
               ...online.map((m) => ({ value: key(m), label: m.model, hint: `${m.providerLabel} · online` })),
             ]}
           />
         </Row>
-        <div className="flex items-start gap-2.5 rounded-2xl border border-border/70 bg-surface/40 px-3 py-2.5">
-          <Cpu className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" strokeWidth={1.6} />
-          <p className="text-[10.5px] leading-relaxed text-muted-foreground">
-            <span className="text-foreground">On your PC:</span>{" "}
-            {local.length ? `${local.length} model${local.length === 1 ? "" : "s"}.` : "none yet."} Add one by dropping a{" "}
-            <span className="font-mono">.gguf</span> file into{" "}
-            {agent.modelsDir ? <span className="break-all font-mono">{agent.modelsDir}</span> : "your VYRSE models folder"}.
-          </p>
-        </div>
+        <LocalModels open={open} />
       </Section>
 
       <Section title="Your AI accounts">

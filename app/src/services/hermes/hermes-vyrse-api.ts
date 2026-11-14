@@ -4,6 +4,7 @@ import { HermesClarify } from "./clarify";
 import type { VyrseBridge } from "./bridge";
 import { HermesGateway } from "./gateway";
 import { HermesProviders } from "./providers";
+import { HermesConnections, HermesLocalModels, HermesMemory, HermesUsage } from "./extras";
 import { IS_PHONE } from "../phone";
 import { HermesSessions } from "./sessions";
 import { HermesSettings } from "./settings";
@@ -105,6 +106,7 @@ export function createHermesVyrseApi(bridge: VyrseBridge): VyrseApi & { gateway:
       subscribe: (callback) => gateway.subscribe(callback),
       restart: () => gateway.restartBackend(),
       setup: () => gateway.setupBackend(),
+      ...(gateway.canInstallBackend ? { install: () => gateway.installBackend() } : {}),
     },
     conversations: {
       list: () => sessions.list(),
@@ -161,7 +163,9 @@ export function createHermesVyrseApi(bridge: VyrseBridge): VyrseApi & { gateway:
       updateWorkspaceItem: (conversationId, id, update) => ui.updateWorkspaceItem(conversationId, id, update),
       fileIndex: (refresh) => ui.fileIndex(refresh),
     },
-    ...(IS_PHONE ? {} : { accounts }),
+    ...(IS_PHONE ? {} : { accounts, localModels: new HermesLocalModels(gateway), connections: new HermesConnections(gateway) }),
+    memory: new HermesMemory(gateway),
+    usage: new HermesUsage(gateway),
     voice,
     reminders: {
       list: () => reminders.list(),

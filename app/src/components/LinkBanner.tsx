@@ -8,7 +8,7 @@ import { cn } from "@/lib/utils";
  * crashed or not installed — and offers the one action that helps. Hidden when online.
  */
 export function LinkBanner() {
-  const { link, restartBackend, setupBackend, booted } = useVyrse();
+  const { link, restartBackend, setupBackend, installBackend, booted } = useVyrse();
   const [showLog, setShowLog] = useState(false);
   if (!booted || link.phase === "online") return null;
 
@@ -16,6 +16,7 @@ export function LinkBanner() {
     link.phase === "starting" || link.phase === "connecting" || link.phase === "reconnecting" || link.phase === "setting-up";
   const failed = link.phase === "failed" || link.phase === "offline";
   const needsSetup = link.phase === "needs-setup";
+  const notInstalled = link.phase === "not-installed";
 
   return (
     <div className="pointer-events-auto mx-auto mb-2 w-full max-w-[min(44rem,90vw)] rounded-xl border border-border-strong bg-surface/80 px-4 py-2.5 backdrop-blur">
@@ -27,7 +28,7 @@ export function LinkBanner() {
         )}
         <div className="min-w-0 flex-1">
           <p className="text-[12.5px] text-foreground">
-            {link.phase === "not-installed" ? "Hermes Agent isn't installed" : link.message}
+{link.message}
           </p>
           {link.detail && <p className={cn("pt-0.5 text-[11px] text-muted-foreground", link.phase === "setting-up" && "truncate")}>{link.detail}</p>}
         </div>
@@ -41,6 +42,17 @@ export function LinkBanner() {
             Set up
           </button>
         )}
+        {notInstalled && installBackend && (
+          <button
+            type="button"
+            data-install-hermes
+            onClick={installBackend}
+            className="flex shrink-0 items-center gap-1.5 rounded-full bg-primary px-3.5 py-1.5 text-[11.5px] text-primary-foreground"
+          >
+            <Download className="size-3.5" strokeWidth={1.8} />
+            Install it for me
+          </button>
+        )}
         {failed && (
           <button
             type="button"
@@ -52,7 +64,7 @@ export function LinkBanner() {
           </button>
         )}
       </div>
-      {link.logTail && link.logTail.length > 0 && (failed || needsSetup) && (
+      {link.logTail && link.logTail.length > 0 && (failed || needsSetup || notInstalled) && (
         <div className="mt-2">
           <button
             type="button"

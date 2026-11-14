@@ -36,6 +36,7 @@ export const IPC_CHANNELS = {
   getStatus: 'vyrse:backend:get-status',
   restart: 'vyrse:backend:restart',
   setup: 'vyrse:backend:setup',
+  installHermes: 'vyrse:backend:install-hermes',
   status: 'vyrse:backend:status',
   presence: 'vyrse:presence',
   orbState: 'vyrse:orb-state',
@@ -73,6 +74,8 @@ export const IPC_CHANNELS = {
   snap: 'vyrse:snap',
   appInfo: 'vyrse:app-info',
   savePaste: 'vyrse:save-paste',
+  installUpdate: 'vyrse:install-update',
+  updateProgress: 'vyrse:update-progress',
 } as const
 
 /** This app's version and, after a check, the newest published release. */
@@ -81,7 +84,15 @@ export interface AppInfo {
   releasesUrl: string
   latest?: string
   newer?: boolean
+  /** the newer release can be installed from inside the app (installed copy, verified download) */
+  canInstall?: boolean
   error?: string
+}
+
+export interface UpdateProgress {
+  phase: 'downloading' | 'checking' | 'installing' | 'ready'
+  done: number
+  total: number
 }
 
 /**
@@ -155,6 +166,8 @@ export interface VyrseBridge {
     restart(): Promise<void>
     /** prepare Hermes for VYRSE (plugin, voice, options), then start */
     setup(): Promise<void>
+    /** install Hermes Agent (its own installer), then set VYRSE up in it and start */
+    installHermes(): Promise<void>
     onStatus(callback: (status: BackendStatus) => void): () => void
   }
   desktop: {
@@ -209,6 +222,9 @@ export interface VyrseBridge {
     appInfo(check?: boolean): Promise<AppInfo | null>
     /** save a picture pasted from the clipboard; returns its path (null = not a picture VYRSE takes) */
     savePaste(mime: string, bytes: Uint8Array): Promise<string | null>
+    /** download the newer release, verify it, start its installer and quit */
+    installUpdate(): Promise<{ ok: boolean; error?: string }>
+    onUpdateProgress(callback: (progress: UpdateProgress) => void): () => void
   }
   /** overlay windows */
   overlayPage: {

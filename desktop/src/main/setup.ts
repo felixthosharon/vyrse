@@ -103,3 +103,50 @@ export function runSetup(source: SetupSource, hermesHome: string, onLine: (line:
     })
   })
 }
+
+/** Hermes Agent's own installer for Windows (the one its README tells people to run). */
+export const HERMES_INSTALLER_URL = 'https://hermes-agent.nousresearch.com/install.ps1'
+
+/**
+ * PowerShell arguments that install Hermes Agent without asking questions: fetch the official installer to a
+ * file and run that file (run as a file it reports success or failure through its exit code). `localScript`
+ * runs a script already on disk instead (developer checks only).
+ */
+export function hermesInstallArgs(localScript?: string): string[] {
+  const base = ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass']
+  if (localScript) return [...base, '-File', localScript, '-NonInteractive']
+  const script = [
+    "$ErrorActionPreference = 'Stop'",
+    '[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12',
+    "$f = Join-Path $env:TEMP 'hermes-install.ps1'",
+    "Write-Output 'Downloading the Hermes installer'",
+    `Invoke-WebRequest -UseBasicParsing -Uri '${HERMES_INSTALLER_URL}' -OutFile $f`,
+    '& powershell.exe -NoProfile -ExecutionPolicy Bypass -File $f -NonInteractive',
+    'exit $LASTEXITCODE',
+  ].join('; ')
+  return [...base, '-Command', script]
+}
+
+/** Run Hermes Agent's installer; true when it finished cleanly. Lines of its output go to `onLine`. */
+export function installHermes(onLine: (line: string) => void, localScript?: string): Promise<boolean> {
+  return new Promise(resolve => {
+    const child = spawn('powershell.exe', hermesInstallArgs(localScript), { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true })
+    let rest = ''
+    const feed = (data: Buffer) => {
+      // The installer draws progress with colour codes; keep the words.
+      const lines = (rest + data.toString('utf8')).replace(/\u001b\[[0-9;?]*[A-Za-z]/g, '').split(/\r?\n|\r/)
+      rest = lines.pop() ?? ''
+      for (const line of lines) if (line.trim()) onLine(line.trimEnd())
+    }
+    child.stdout.on('data', feed)
+    child.stderr.on('data', feed)
+    child.once('error', err => {
+      onLine(`the installer could not start: ${err.message}`)
+      resolve(false)
+    })
+    child.once('exit', code => {
+      if (rest.trim()) onLine(rest.trimEnd())
+      resolve(code === 0)
+    })
+  })
+}

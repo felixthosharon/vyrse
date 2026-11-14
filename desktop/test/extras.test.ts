@@ -1,8 +1,8 @@
 import { describe, expect, it, vi } from 'vitest'
 
-vi.mock('electron', () => ({ app: {}, ipcMain: {}, net: {} }))
+vi.mock('electron', () => ({ app: { isPackaged: false }, ipcMain: {}, net: {} }))
 
-import { isNewer, parseVersion, pasteFileName } from '../src/main/extras'
+import { checksumFor, isNewer, parseVersion, pasteFileName, updateAssets } from '../src/main/extras'
 
 describe('update check', () => {
   it('reads plain versions only', () => {
@@ -32,5 +32,36 @@ describe('pasted pictures', () => {
     expect(pasteFileName('text/html', new Date(0))).toBeNull()
     expect(pasteFileName('application/x-msdownload', new Date(0))).toBeNull()
     expect(pasteFileName('image/svg+xml', new Date(0))).toBeNull()
+  })
+})
+
+describe('one-click update', () => {
+  const base = 'https://github.com/felixthosharon/vyrse/releases/download/v1.8.0/'
+  const assets = [
+    { name: 'VYRSE-Setup-1.8.0.exe', browser_download_url: `${base}VYRSE-Setup-1.8.0.exe` },
+    { name: 'VYRSE.apk', browser_download_url: `${base}VYRSE.apk` },
+    { name: 'SHA256SUMS.txt', browser_download_url: `${base}SHA256SUMS.txt` },
+  ]
+
+  it('finds the installer and the checksum list of a release', () => {
+    expect(updateAssets(assets, '1.8.0')).toEqual({ installer: `${base}VYRSE-Setup-1.8.0.exe`, sums: `${base}SHA256SUMS.txt`, name: 'VYRSE-Setup-1.8.0.exe' })
+  })
+
+  it('refuses a release without checksums, a wrong version, or a download from elsewhere', () => {
+    expect(updateAssets(assets.slice(0, 2), '1.8.0')).toBeNull()
+    expect(updateAssets(assets, '1.9.0')).toBeNull()
+    expect(updateAssets(assets, 'latest')).toBeNull()
+    expect(updateAssets([{ name: 'VYRSE-Setup-1.8.0.exe', browser_download_url: 'https://example.com/VYRSE-Setup-1.8.0.exe' }, assets[2]], '1.8.0')).toBeNull()
+    expect(updateAssets(null, '1.8.0')).toBeNull()
+  })
+
+  it('reads the hash for one file out of a checksum list', () => {
+    const a = 'a'.repeat(64)
+    const b = 'B'.repeat(64)
+    const sums = `${a} *VYRSE-Setup-1.8.0.exe\r\n${b}  VYRSE.apk\n`
+    expect(checksumFor(sums, 'VYRSE-Setup-1.8.0.exe')).toBe(a)
+    expect(checksumFor(sums, 'VYRSE.apk')).toBe('b'.repeat(64))
+    expect(checksumFor(sums, 'other.exe')).toBeNull()
+    expect(checksumFor('not a checksum list', 'VYRSE.apk')).toBeNull()
   })
 })

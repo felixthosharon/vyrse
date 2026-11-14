@@ -168,6 +168,122 @@ export interface AgentSettings {
   modelsDir?: string;
 }
 
+/** A model file on this PC (a .gguf Hermes serves). */
+export interface LocalModel {
+  id: string;
+  bytes: number;
+}
+
+/** Something long-running in the local AI engine: a download, installing the engine, switching model. */
+export interface ModelJob {
+  id: string;
+  kind: "download" | "engine" | "activate";
+  name: string;
+  modelId?: string;
+  state: "running" | "paused" | "done" | "error";
+  detail: string;
+  doneBytes: number;
+  totalBytes?: number;
+  percent?: number;
+  bytesPerSec?: number;
+  etaSeconds?: number;
+  canPause: boolean;
+  canResume: boolean;
+}
+
+export interface LocalModelsStatus {
+  /** the local AI engine (llama.cpp) is installed */
+  engineInstalled: boolean;
+  active?: string;
+  models: LocalModel[];
+  gpu?: string;
+  gpuBytes?: number;
+  ramBytes?: number;
+  jobs: ModelJob[];
+}
+
+/** A model family found on Hugging Face. */
+export interface ModelRepo {
+  repo: string;
+  downloads: number;
+}
+
+/** One downloadable size of a model. `fit`: runs fully on the GPU / runs slowly / too big for this PC. */
+export interface ModelBuild {
+  label: string;
+  paths: string[];
+  bytes: number;
+  fit: "gpu" | "slow" | "too-big" | "unknown";
+}
+
+export interface LocalModelsApi {
+  status(): Promise<LocalModelsStatus>;
+  jobs(): Promise<ModelJob[]>;
+  search(query: string): Promise<ModelRepo[]>;
+  builds(repo: string): Promise<ModelBuild[]>;
+  download(repo: string, build: ModelBuild): Promise<{ jobId?: string; already?: boolean }>;
+  installEngine(): Promise<string>;
+  pause(jobId: string): Promise<void>;
+  resume(jobId: string): Promise<void>;
+  use(modelId: string): Promise<string>;
+  remove(modelId: string): Promise<void>;
+}
+
+/** An outside service VYRSE can use (Notion, Linear, Todoist…), through Hermes' MCP connectors. */
+export interface Connector {
+  id: string;
+  label: string;
+  description: string;
+  /** needs a sign-in on the service's own page */
+  signIn: boolean;
+  added: boolean;
+  on: boolean;
+  host: string;
+}
+
+export interface ConnectorSignIn {
+  id: string;
+  flow: string;
+  url: string;
+}
+
+export interface ConnectionsApi {
+  list(): Promise<Connector[]>;
+  add(id: string): Promise<void>;
+  remove(id: string): Promise<void>;
+  setOn(id: string, on: boolean): Promise<void>;
+  check(id: string): Promise<{ ok: boolean; tools: number; message?: string }>;
+  startSignIn(id: string): Promise<ConnectorSignIn>;
+  pollSignIn(signIn: ConnectorSignIn): Promise<{ state: "waiting" | "done" | "failed"; message?: string }>;
+  cancelSignIn(signIn: ConnectorSignIn): Promise<void>;
+}
+
+/** What VYRSE remembers: `user` = about you, `memory` = about your PC and how you like things done. */
+export type MemoryNotes = Record<"user" | "memory", { entries: string[]; used: number; limit: number }>;
+
+export interface MemoryApi {
+  list(): Promise<MemoryNotes>;
+  add(target: "user" | "memory", content: string): Promise<{ ok: boolean; message?: string; memory: MemoryNotes }>;
+  replace(target: "user" | "memory", entry: string, content: string): Promise<{ ok: boolean; message?: string; memory: MemoryNotes }>;
+  remove(target: "user" | "memory", entry: string): Promise<{ ok: boolean; message?: string; memory: MemoryNotes }>;
+}
+
+/** How much VYRSE was used, what it cost, and what the local model saved. Money is in US dollars. */
+export interface UsageSummary {
+  days: number;
+  tokens: number;
+  messages: number;
+  /** what online models charged (estimated by Hermes from list prices) */
+  paid: number;
+  /** what the words answered on this PC would have cost on a typical paid API */
+  saved: number;
+  models: { model: string; local: boolean; inputTokens: number; outputTokens: number; messages: number; paid: number; saved: number }[];
+}
+
+export interface UsageApi {
+  summary(days: number): Promise<UsageSummary>;
+}
+
 /** One streamed spoken reply (Hermes speak-stream). */
 export interface SpeechStream {
   push(text: string): void;
@@ -297,6 +413,8 @@ export interface VyrseApi {
     restart(): Promise<void>;
     /** first run on the desktop: prepare Hermes for VYRSE, then start */
     setup?(): Promise<void>;
+    /** Hermes isn't installed: install it, then set up and start (desktop) */
+    install?(): Promise<void>;
   };
 
   conversations?: {
@@ -336,6 +454,13 @@ export interface VyrseApi {
 
   /** Online AI accounts (desktop only: keys are entered on the PC that keeps them). */
   accounts?: AiAccountsApi;
+  /** Model files on this PC: find, download, switch, delete (desktop only). */
+  localModels?: LocalModelsApi;
+  /** Outside services VYRSE can use (desktop only). */
+  connections?: ConnectionsApi;
+  /** The notes VYRSE keeps about you. */
+  memory?: MemoryApi;
+  usage?: UsageApi;
 
   /** Interface control by Hermes and the shared interface-preference store (vyrse plugin). */
   ui?: {

@@ -1,6 +1,6 @@
 import { contextBridge, ipcRenderer, webUtils, type IpcRendererEvent } from 'electron'
 
-import type { AppInfo, AlexaStatus, EchoSkillStatus, OverlayMessage, PhoneBridgeStatus, SnapPhoto, QuickUpdate, BackendConnection, BackendStatus, OrbState, VyrseBridge } from '../shared/backend-types'
+import type { AppInfo, UpdateProgress, AlexaStatus, EchoSkillStatus, OverlayMessage, PhoneBridgeStatus, SnapPhoto, QuickUpdate, BackendConnection, BackendStatus, OrbState, VyrseBridge } from '../shared/backend-types'
 
 // Sandboxed preloads cannot require local modules, so channel names are inlined
 // here; they must match IPC_CHANNELS in shared/backend-types.ts.
@@ -9,6 +9,7 @@ const CH = {
   getStatus: 'vyrse:backend:get-status',
   restart: 'vyrse:backend:restart',
   setup: 'vyrse:backend:setup',
+  installHermes: 'vyrse:backend:install-hermes',
   status: 'vyrse:backend:status',
   presence: 'vyrse:presence',
   orbState: 'vyrse:orb-state',
@@ -46,6 +47,8 @@ const CH = {
   snap: 'vyrse:snap',
   appInfo: 'vyrse:app-info',
   savePaste: 'vyrse:save-paste',
+  installUpdate: 'vyrse:install-update',
+  updateProgress: 'vyrse:update-progress',
 } as const
 
 const bridge: VyrseBridge = {
@@ -54,6 +57,7 @@ const bridge: VyrseBridge = {
     getStatus: () => ipcRenderer.invoke(CH.getStatus) as Promise<BackendStatus>,
     restart: () => ipcRenderer.invoke(CH.restart) as Promise<void>,
     setup: () => ipcRenderer.invoke(CH.setup) as Promise<void>,
+    installHermes: () => ipcRenderer.invoke(CH.installHermes) as Promise<void>,
     onStatus(callback) {
       const listener = (_event: IpcRendererEvent, status: BackendStatus) => callback(status)
       ipcRenderer.on(CH.status, listener)
@@ -133,6 +137,12 @@ const bridge: VyrseBridge = {
     },
     appInfo: check => ipcRenderer.invoke(CH.appInfo, check === true) as Promise<AppInfo | null>,
     savePaste: (mime, bytes) => ipcRenderer.invoke(CH.savePaste, mime, bytes) as Promise<string | null>,
+    installUpdate: () => ipcRenderer.invoke(CH.installUpdate) as Promise<{ ok: boolean; error?: string }>,
+    onUpdateProgress(callback) {
+      const listener = (_event: IpcRendererEvent, progress: UpdateProgress) => callback(progress)
+      ipcRenderer.on(CH.updateProgress, listener)
+      return () => ipcRenderer.removeListener(CH.updateProgress, listener)
+    },
   },
   overlayPage: {
     onShow(callback) {

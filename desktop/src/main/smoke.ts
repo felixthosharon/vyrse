@@ -153,7 +153,7 @@ export function driveUi(win: BrowserWindow, backend: HermesBackend, prompt: stri
 
   let started = false
   backend.on('status', status => {
-    if (status.phase !== 'ready' || started) return
+    if (status.phase !== (process.env.VYRSE_SMOKE_START ?? 'ready') || started) return
     started = true
     void (async () => {
       try {
@@ -244,7 +244,7 @@ export function runScript(win: BrowserWindow, backend: HermesBackend, steps: Ste
     js<boolean>(`(() => { const t = document.querySelector('textarea'); return !!t && !/connecting|reconnecting|offline/i.test(document.querySelector('header')?.innerText ?? '') })()`)
   let started = false
   backend.on('status', status => {
-    if (status.phase !== 'ready' || started) return
+    if (status.phase !== (process.env.VYRSE_SMOKE_START ?? 'ready') || started) return
     started = true
     void (async () => {
       try {

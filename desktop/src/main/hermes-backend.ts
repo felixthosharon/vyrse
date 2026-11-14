@@ -7,7 +7,7 @@ import os from 'node:os'
 import type { BackendConnection, BackendStatus } from '../shared/backend-types'
 import { LogTail, parseReadyPort, RestartPolicy } from './backend-policy'
 import { hermesCommand, locateHermes, type HermesInstall } from './hermes-locator'
-import { runSetup, setupState, type SetupSource } from './setup'
+import { installHermes, runSetup, setupState, type SetupSource } from './setup'
 
 const READY_TIMEOUT_MS = 90_000
 const HEALTH_TIMEOUT_MS = 20_000
@@ -44,6 +44,8 @@ export class HermesBackend extends EventEmitter<HermesBackendEvents> {
   constructor(
     private readonly logFile?: string,
     private readonly setupSource: SetupSource | null = null,
+    /** developer checks only: a local script to run in place of Hermes' installer */
+    private readonly installerOverride?: string,
   ) {
     super()
   }
@@ -69,7 +71,7 @@ export class HermesBackend extends EventEmitter<HermesBackendEvents> {
       this.setStatus({
         phase: 'not-installed',
         message: 'Hermes Agent is not installed',
-        detail: 'Install Hermes Agent (https://hermes-agent.nousresearch.com), then restart VYRSE.',
+        detail: 'Hermes Agent is the free AI engine VYRSE runs on. VYRSE can install it for you (about 10 minutes, a few GB).',
       })
       return
     }
@@ -87,6 +89,32 @@ export class HermesBackend extends EventEmitter<HermesBackendEvents> {
     // A newer VYRSE was installed over an older one: bring Hermes up to date, then start either way.
     if (state === 'stale') await this.applySetup('Updating VYRSE in Hermes')
     await this.spawnOnce()
+  }
+
+  /**
+   * Hermes isn't on this PC: run its own installer, then VYRSE's setup, so one click gets from a bare PC to a
+   * working app. Asked for by the user from the banner.
+   */
+  async installHermes(): Promise<void> {
+    if (this.status.phase !== 'not-installed') return
+    const message = 'Installing Hermes Agent'
+    this.setStatus({ phase: 'setting-up', message, detail: 'Getting the installer' })
+    const ok = await installHermes(line => {
+      this.log(`[install] ${line}`)
+      this.setStatus({ phase: 'setting-up', message, detail: line.trim() })
+    }, this.installerOverride)
+    this.install = locateHermes()
+    if (!ok || !this.install) {
+      this.setStatus({
+        phase: 'not-installed',
+        message: "Hermes Agent didn't install",
+        detail: 'Check the details below and try again, or install it yourself from https://hermes-agent.nousresearch.com and restart VYRSE.',
+        logTail: this.logTail.last(),
+      })
+      return
+    }
+    await this.start()
+    if (this.getStatus().phase === 'needs-setup') await this.setup()
   }
 
   /** First-time setup, asked for by the user from the banner; starts Hermes when it worked. */

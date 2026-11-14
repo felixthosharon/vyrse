@@ -39,6 +39,8 @@ export interface VyrseBridge {
     restart(): Promise<void>;
     /** prepare Hermes for VYRSE, then start (desktop only; older shells lack it) */
     setup?(): Promise<void>;
+    /** install Hermes Agent, then set VYRSE up in it (desktop only; older shells lack it) */
+    installHermes?(): Promise<void>;
     onStatus(callback: (status: BackendStatus) => void): () => void;
   };
   /** present in the desktop app (older shells may lack it) */
@@ -73,6 +75,9 @@ export interface VyrseBridge {
     appInfo?(check?: boolean): Promise<AppInfo | null>;
     /** save a picture pasted from the clipboard; returns its path */
     savePaste?(mime: string, bytes: Uint8Array): Promise<string | null>;
+    /** download the newer release, verify it, start its installer and quit */
+    installUpdate?(): Promise<{ ok: boolean; error?: string }>;
+    onUpdateProgress?(callback: (progress: UpdateProgress) => void): () => void;
   };
 }
 
@@ -81,7 +86,14 @@ export interface AppInfo {
   releasesUrl: string;
   latest?: string;
   newer?: boolean;
+  canInstall?: boolean;
   error?: string;
+}
+
+export interface UpdateProgress {
+  phase: "downloading" | "checking" | "installing" | "ready";
+  done: number;
+  total: number;
 }
 
 /** Mirrors OverlayMessage in desktop/src/shared/backend-types.ts. `rect` is in physical screen pixels. */

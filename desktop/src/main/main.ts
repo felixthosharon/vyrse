@@ -49,6 +49,7 @@ async function main(): Promise<void> {
   const backend = new HermesBackend(
     path.join(app.getPath('logs'), 'hermes-backend.log'),
     findSetupSource(app.isPackaged, process.resourcesPath, app.getVersion()),
+    app.isPackaged ? undefined : process.env.VYRSE_HERMES_INSTALLER,
   )
   let quitting = false
 

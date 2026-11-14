@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { ExternalLink, Loader2 } from "lucide-react";
-import { getDesktopBridge, type AppInfo } from "@/services/hermes/bridge";
+import { getDesktopBridge, type AppInfo, type UpdateProgress } from "@/services/hermes/bridge";
 import { useVyrse } from "@/lib/vyrse/store";
 import { IS_PHONE } from "@/services/phone";
 import { Row, Section, SwitchRow } from "./controls";
@@ -36,6 +36,32 @@ export function AboutSection({ open }: { open: boolean }) {
   const desktop = getDesktopBridge()?.desktop;
   const [info, setInfo] = useState<AppInfo | null>(null);
   const [checking, setChecking] = useState(false);
+  const [progress, setProgress] = useState<UpdateProgress | null>(null);
+  const [updateError, setUpdateError] = useState<string | null>(null);
+  useEffect(() => desktop?.onUpdateProgress?.(setProgress), [desktop]);
+
+  const install = async () => {
+    if (!desktop?.installUpdate || progress) return;
+    setUpdateError(null);
+    setProgress({ phase: "downloading", done: 0, total: 0 });
+    const res = await desktop.installUpdate().catch((err) => ({ ok: false, error: String(err) }));
+    if (!res.ok) {
+      setProgress(null);
+      setUpdateError(res.error ?? "The update didn't work.");
+    }
+  };
+  const mb = (n: number) => Math.round(n / 1024 / 1024);
+  const progressText = !progress
+    ? ""
+    : progress.phase === "downloading"
+      ? progress.total
+        ? `Downloading… ${mb(progress.done)} of ${mb(progress.total)} MB`
+        : "Downloading…"
+      : progress.phase === "checking"
+        ? "Checking the download…"
+        : progress.phase === "installing"
+          ? "Installing. VYRSE will close and reopen."
+          : "Downloaded and checked.";
 
   useEffect(() => {
     if (open && !info) void desktop?.appInfo?.().then((i) => i && setInfo(i));
@@ -70,8 +96,14 @@ export function AboutSection({ open }: { open: boolean }) {
       {desktop?.appInfo && (
         <>
           <div className="flex items-center justify-between gap-3 rounded-2xl border border-border/70 bg-surface/40 px-3 py-2.5">
-            <span data-update-status className="min-w-0 text-[11.5px] text-foreground">{status || "See if a newer VYRSE is out."}</span>
-            {info?.newer ? (
+            <span data-update-status className="min-w-0 text-[11.5px] text-foreground">{progressText || status || "See if a newer VYRSE is out."}</span>
+            {progress ? (
+              <Loader2 className="size-4 shrink-0 animate-spin text-primary" />
+            ) : info?.newer && info.canInstall ? (
+              <button type="button" onClick={() => void install()} className="shrink-0 rounded-full bg-primary px-3.5 py-1.5 text-[11.5px] text-primary-foreground">
+                Update now
+              </button>
+            ) : info?.newer ? (
               <a href={info.releasesUrl} target="_blank" rel="noreferrer" className="shrink-0 rounded-full bg-primary px-3.5 py-1.5 text-[11.5px] text-primary-foreground">
                 Download
               </a>
@@ -82,6 +114,17 @@ export function AboutSection({ open }: { open: boolean }) {
               </button>
             )}
           </div>
+          {progress?.phase === "downloading" && progress.total > 0 && (
+            <div className="h-1.5 overflow-hidden rounded-full bg-secondary/60">
+              <div className="h-full rounded-full bg-primary transition-[width] duration-300" style={{ width: `${Math.round((progress.done / progress.total) * 100)}%` }} />
+            </div>
+          )}
+          {updateError && (
+            <p role="alert" className="text-[11px] leading-relaxed text-destructive">
+              {updateError}{" "}
+              {info && <a href={info.releasesUrl} target="_blank" rel="noreferrer" className="underline">Get it from the releases page instead.</a>}
+            </p>
+          )}
           <SwitchRow
             label="Tell me about new versions"
             hint="asks GitHub for the latest release when VYRSE starts · nothing about you is sent"

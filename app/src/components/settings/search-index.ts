@@ -1,6 +1,6 @@
 import { IS_PHONE } from "@/services/phone";
 
-export type SettingsPage = "assistant" | "models" | "voice" | "memory" | "reminders" | "alexa" | "phone" | "skills" | "appearance" | "about";
+export type SettingsPage = "assistant" | "models" | "voice" | "memory" | "reminders" | "alexa" | "phone" | "connections" | "usage" | "skills" | "appearance" | "about";
 
 /** One searchable setting: `label` is the row's exact on-screen label (used to scroll to it). */
 export interface SettingEntry {
@@ -38,6 +38,10 @@ const ALL: SettingEntry[] = [
   { label: "Reasoning when talking", page: "voice", keywords: "voice thinking speed" },
   { label: "Voice volume", page: "voice", keywords: "loudness sound level" },
   { label: "Long-term memory", page: "memory", keywords: "remember notes forget privacy" },
+  { label: "About you", page: "memory", keywords: "what do you know about me remembers notes edit delete forget profile" },
+  { label: "Get a model", page: "models", keywords: "download model gguf hugging face install local llm new", pc: true },
+  { label: "Connections", page: "connections", keywords: "apps services notion linear todoist dropbox figma canva stripe github mcp connector integrate plugin", pc: true },
+  { label: "Usage and savings", page: "usage", keywords: "cost money saved tokens spend bill price usage how much" },
   { label: "Reminders & routines", page: "reminders", keywords: "alarm timer schedule cron routine" },
   { label: "Echo / Alexa", page: "alexa", keywords: "amazon echo dot alexa sign in voice monkey skill", pc: true },
   { label: "Phone access", page: "phone", keywords: "android mobile app pair", pc: true },

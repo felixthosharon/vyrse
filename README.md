@@ -22,6 +22,11 @@ your conversations, memory and voice never leave your machine unless you connect
   or run Alexa commands.
 - **Bring your own AI (optional).** *Settings → AI models* connects a ChatGPT Plus/Pro subscription (sign in), or a
   Claude, Gemini, OpenAI, OpenRouter or Grok API key (paste it). Switch between those and the model on your PC any time.
+- **Your apps and services (optional).** *Settings → Apps and services* connects Notion, Linear, Todoist, Dropbox,
+  Figma and dozens more (Hermes' MCP connectors); each signs in on its own page.
+- **Memory you can read.** *Settings → Memory* shows every note VYRSE keeps about you; edit or delete any of them.
+- **Usage and savings.** See how much you used VYRSE, what online models charged, and what answering on your own
+  PC saved you compared with a paid AI API.
 - **Talk styles.** Normal, Vibe, Fam, Chill, Hype, Focus, Pro and Savage (it roasts you, then still does the job).
 - **Liquid-glass interface** with a live animated presence, workspace panel for charts and tables, settings
   search, light and dark themes.
@@ -34,21 +39,23 @@ your conversations, memory and voice never leave your machine unless you connect
 - **Android 8+** for the phone app (optional).
 
 ## Install
-1. **Install Hermes Agent** (the AI engine): follow https://github.com/NousResearch/hermes-agent. It installs
-   to `%LOCALAPPDATA%\hermes` and brings its own Python and llama.cpp.
-   Open a new terminal afterwards and run `hermes --version` once, so Hermes finishes setting itself up.
-2. **Install VYRSE:** download `VYRSE-Setup-x.y.z.exe` from the
+1. **Install VYRSE:** download `VYRSE-Setup-x.y.z.exe` from the
    [Releases page](https://github.com/felixthosharon/vyrse/releases/latest) and run it.
-3. **Start VYRSE and press "Set up".** The first time, VYRSE offers to prepare Hermes: it adds the VYRSE plugin,
-   installs the voice libraries, downloads and verifies the Kokoro voice model (about 350 MB), installs the wake
-   word and VYRSE's skills, and sets the Hermes options VYRSE needs. It takes a few minutes and needs
-   [Git for Windows](https://git-scm.com). After an update, VYRSE repeats this by itself.
-4. **Add an AI model**, any of these:
-   - drop a `.gguf` file into `%USERPROFILE%\VYRSE\models` (its `README.md` says what fits your GPU), or
-   - run `hermes model` and pick a local model (Hermes downloads it), or
-   - open *Settings → AI models* in VYRSE and connect an account you already have: sign in with ChatGPT, or paste
-     a Claude, Gemini, OpenAI, OpenRouter or Grok API key. Your messages then go to that company.
-5. **Talk to it.** On first run VYRSE asks your name. Then say "VYRSE".
+2. **Press "Install it for me".** VYRSE runs on [Hermes Agent](https://github.com/NousResearch/hermes-agent), a
+   free AI engine. If it isn't on your PC yet, VYRSE runs Hermes' own installer for you (about 10 minutes, a few
+   GB, into `%LOCALAPPDATA%\hermes`), then sets itself up in it: the VYRSE plugin, the voice libraries, the
+   Kokoro voice model (about 350 MB), the wake word and VYRSE's skills. Already have Hermes? VYRSE only offers
+   **Set up**. After an update, VYRSE repeats its own setup by itself.
+3. **Get an AI model** in *Settings → AI models*, any of these:
+   - **Download one.** Pick "Small and fast", "Balanced" or "Smarter" (or search by name); VYRSE shows the size
+     that suits your GPU and downloads it, with pause and resume.
+   - **Connect an account you already have:** sign in with ChatGPT, or paste a Claude, Gemini, OpenAI,
+     OpenRouter or Grok API key. Your messages then go to that company.
+   - Already have a `.gguf` file? Drop it into `%USERPROFILE%\VYRSE\models`.
+4. **Talk to it.** On first run VYRSE asks your name. Then say "VYRSE".
+
+Updates: *Settings → About → Check for updates* downloads the new version, checks it against the release's
+checksums and installs it.
 
 Building from source instead? Clone this repo and run the same setup yourself; your models then go in the repo's
 `models` folder:

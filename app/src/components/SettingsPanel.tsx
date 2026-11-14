@@ -10,6 +10,8 @@ import {
   ChevronRight,
   Cpu,
   Info,
+  Plug,
+  PiggyBank,
   Mic2,
   Palette,
   Puzzle,
@@ -27,6 +29,9 @@ import { PhoneSection } from "./settings/PhoneSection";
 import { SkillsSection } from "./settings/SkillsSection";
 import { ModelsSection } from "./settings/ModelsSection";
 import { AboutSection, useUpdateNotice } from "./settings/AboutSection";
+import { ConnectionsSection } from "./settings/ConnectionsSection";
+import { MemoryNotes } from "./settings/MemoryNotes";
+import { UsageSection } from "./settings/UsageSection";
 import { VoiceSection } from "./settings/VoiceSection";
 import { searchSettings, type SettingEntry } from "./settings/search-index";
 import { useVyrse } from "@/lib/vyrse/store";
@@ -35,7 +40,7 @@ import { TALK_STYLES, type TalkStyle } from "@/lib/vyrse/talk-styles";
 import { cn } from "@/lib/utils";
 import { IS_PHONE } from "@/services/phone";
 
-type PageId = "assistant" | "models" | "voice" | "memory" | "reminders" | "alexa" | "phone" | "skills" | "appearance" | "about";
+type PageId = "assistant" | "models" | "voice" | "memory" | "reminders" | "alexa" | "phone" | "connections" | "usage" | "skills" | "appearance" | "about";
 
 interface PageDef {
   id: PageId;
@@ -61,11 +66,13 @@ const GROUPS: { title: string; pages: PageDef[] }[] = [
       // Echo setup signs in to Amazon from the PC app, so the phone doesn't show it.
       ...(IS_PHONE ? [] : [{ id: "alexa" as const, label: "Echo / Alexa", icon: Speaker }]),
       { id: "phone", label: "Phone", icon: Smartphone },
+      ...(IS_PHONE ? [] : [{ id: "connections" as const, label: "Apps and services", icon: Plug }]),
     ],
   },
   {
     title: "More",
     pages: [
+      { id: "usage", label: "Usage and savings", icon: PiggyBank },
       { id: "skills", label: "Skills", icon: Puzzle },
       { id: "appearance", label: "Appearance", icon: Palette },
       { id: "about", label: "About", icon: Info },
@@ -221,12 +228,14 @@ export function SettingsPanel() {
     voice: IS_PHONE
       ? `${phoneWake ? "Wake word on" : "Tap to talk"} · voice replies ${s.voiceResponses ? "on" : "off"}`
       : [s.voiceActivation ? "Wake word on" : "Wake word off", s.voiceResponses ? "voice replies on" : "voice replies off"].join(" · "),
-    memory: agent ? (agent.memoryEnabled ? "Long-term memory on" : "Long-term memory off") : "Memory and microphone",
+    memory: agent ? (agent.memoryEnabled ? "See and edit what VYRSE remembers" : "Long-term memory off") : "Memory and microphone",
     reminders: "Reminders and routines",
     alexa: "Your Echo speaks and answers for VYRSE",
     phone: IS_PHONE ? "Connected to your PC" : "Use VYRSE on your Android phone",
     skills: "Add-on know-how Hermes can use",
     about: "Version, updates and the project",
+    connections: "Notion, Linear, Todoist, Dropbox and more",
+    usage: "What you used, and what your PC saved you",
     appearance: `${s.theme === "system" ? "System" : s.theme === "dark" ? "Dark" : "Light"} theme · ${s.glass === "off" ? "no glass" : `${s.glass ?? "liquid"} glass`}`,
   };
 
@@ -312,6 +321,7 @@ export function SettingsPanel() {
             {agent && (
               <SwitchRow label="Long-term memory" hint={agent.memoryEnabled ? `${Math.max(0, Math.round(agent.memoryBytes / 102.4) / 10)} KB of notes kept by Hermes` : "Hermes keeps no notes between conversations"} checked={agent.memoryEnabled} onChange={setMemoryEnabled} />
             )}
+            <MemoryNotes open={settingsOpen} />
             <div className="flex items-center justify-between gap-3 rounded-2xl border border-border/70 bg-surface/40 px-3 py-2.5">
               <div className="flex items-center gap-2"><Mic2 className="size-3.5 text-muted-foreground" /><span className="text-[11.5px] text-foreground">Microphone</span></div>
               <span className={cn("rounded-full border px-2.5 py-1 font-mono text-[9px]", micLive ? "border-primary/35 text-primary" : "border-border text-muted-foreground")}>{micLive ? "live" : "off"}</span>
@@ -333,6 +343,10 @@ export function SettingsPanel() {
         return <SkillsSection open={settingsOpen} />;
       case "about":
         return <AboutSection open={settingsOpen} />;
+      case "connections":
+        return <ConnectionsSection open={settingsOpen} />;
+      case "usage":
+        return <UsageSection open={settingsOpen} />;
       case "appearance":
         return (
           <>

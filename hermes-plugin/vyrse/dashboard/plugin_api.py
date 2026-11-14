@@ -362,3 +362,29 @@ def _score_and_save(raw: bytes) -> Dict[str, Any]:
         "wake_triggered": triggered,
         "gated_fraction": round(gated / max(1, len(probs)), 2),
     }
+
+
+# ---- what VYRSE remembers (Settings -> Memory) --------------------------------------------------------------
+def _memory():
+    return _load("vyrse_plugin_memory_api", "dashboard/memory_api.py")
+
+
+@router.get("/memory")
+async def memory_list() -> Dict[str, Any]:
+    return await asyncio.to_thread(_memory().listing)
+
+
+@router.post("/memory")
+async def memory_add(body: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
+    return await asyncio.to_thread(_memory().add, str(body.get("target") or ""), str(body.get("content") or ""))
+
+
+@router.put("/memory")
+async def memory_replace(body: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
+    return await asyncio.to_thread(
+        _memory().replace, str(body.get("target") or ""), str(body.get("entry") or ""), str(body.get("content") or ""))
+
+
+@router.post("/memory/remove")
+async def memory_remove(body: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
+    return await asyncio.to_thread(_memory().remove, str(body.get("target") or ""), str(body.get("entry") or ""))

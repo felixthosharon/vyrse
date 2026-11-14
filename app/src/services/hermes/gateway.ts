@@ -134,6 +134,15 @@ export class HermesGateway {
     return this.bridge.backend.restart();
   }
 
+  /** true when this shell can install Hermes itself */
+  get canInstallBackend(): boolean {
+    return Boolean(this.bridge.backend.installHermes);
+  }
+
+  installBackend(): Promise<void> {
+    return this.bridge.backend.installHermes?.() ?? Promise.resolve();
+  }
+
   setupBackend(): Promise<void> {
     return this.bridge.backend.setup?.() ?? this.bridge.backend.restart();
   }

@@ -11,6 +11,7 @@ export function registerBackendIpc(backend: HermesBackend): void {
   ipcMain.handle(IPC_CHANNELS.getStatus, event => (trusted(event) ? backend.getStatus() : null))
   ipcMain.handle(IPC_CHANNELS.restart, event => (trusted(event) ? backend.restart() : undefined))
   ipcMain.handle(IPC_CHANNELS.setup, event => (trusted(event) ? backend.setup() : undefined))
+  ipcMain.handle(IPC_CHANNELS.installHermes, event => (trusted(event) ? backend.installHermes() : undefined))
 
   backend.on('status', (status: BackendStatus) => {
     // The renderer never sees log tails unless the backend actually failed.

@@ -31,14 +31,17 @@ SCHEMA: Dict[str, Any] = {
         "and the gaming stretch going on right now: 'how long have I been gaming today?'); action=games (installed "
         "Steam games); action=rewind (a timeline of what was on screen: 'what was I doing before lunch', 'what did I have open "
         "yesterday'; then you can reopen things with vyrse_files/vyrse_desktop); action=recap (the nightly recap: 'how was my "
-        "day', 'recap my day'); action=doctor (a PC check-up: what's slowing it or worth fixing, with fixes to offer). "
+        "day', 'recap my day'); action=doctor (a PC check-up: what's slowing it or worth fixing, with fixes to offer); "
+        "action=savings (money VYRSE saved by answering on this PC instead of a paid AI, and what online models charged: "
+        "'how much have you saved me?'). "
         "show=true also puts the result in "
         "VYRSE's workspace (chart, bar chart or table), so you only need to say a sentence about it."
     ),
     "parameters": {
         "type": "object",
         "properties": {
-            "action": {"type": "string", "enum": ["overview", "processes", "disks", "storage", "sample", "watch", "stop_watch", "usage", "games", "rewind", "recap", "doctor"]},
+            "action": {"type": "string", "enum": ["overview", "processes", "disks", "storage", "sample", "watch", "stop_watch", "usage", "games", "rewind", "recap", "doctor", "savings"]},
+            "days": {"type": "number", "description": "For savings: how far back, 1-365. Default 30 (7 = this week)."},
             "hours": {"type": "number", "description": "For rewind: how far back from now (default 3), or with day=yesterday the whole day."},
             "day": {"type": "string", "enum": ["today", "yesterday"], "description": "For rewind: a whole day instead of the last hours."},
             "date": {"type": "string", "description": f"For usage or rewind: one specific day, YYYY-MM-DD. It is {_date.today().year} now: "
@@ -391,7 +394,7 @@ def handle(params: Dict[str, Any], **_: Any) -> str:
 
     action = params.get("action")
     # In VYRSE the answer to "how's my PC" / "what's eating my storage" is a picture: draw it unless told not to.
-    show = params.get("show") is not False if action in ("overview", "storage", "processes", "usage") else bool(params.get("show"))
+    show = params.get("show") is not False if action in ("overview", "storage", "processes", "usage", "savings") else bool(params.get("show"))
     result: Dict[str, Any] = {"success": True}
     try:
         if action == "overview":
@@ -518,6 +521,18 @@ def handle(params: Dict[str, Any], **_: Any) -> str:
                            "unit": " min", "points": [{"label": a["app"], "value": a["minutes"]} for a in top],
                            "highlight": next((a["app"] for a in top if a["game"]), ""),
                            "caption": f"{rep['gaming']} gaming · {rep['screen_time']} in total"})
+        elif action == "savings":
+            from . import savings
+
+            days = int(_num_or_none(params.get("days")) or 30)
+            rep = savings.summary(days)
+            result.update(rep)
+            if rep.get("ok") and show:
+                label = {7: "this week", 30: "the last 30 days", 365: "the last year"}.get(rep["days"], f"the last {rep['days']} days")
+                result["workspace"] = _show({"kind": "stats", "id": "savings", "title": f"Savings · {label}",
+                                             "items": [{"label": "Saved", "value": f"${rep['saved_usd']:.2f}"},
+                                                       {"label": "Charged online", "value": f"${rep['paid_usd']:.2f}"},
+                                                       {"label": "Tokens", "value": f"{rep['tokens']:,}"}]})
         elif action in ("recap", "doctor"):
             from . import recap
 

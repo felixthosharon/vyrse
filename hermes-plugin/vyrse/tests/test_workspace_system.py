@@ -182,6 +182,13 @@ def test_picker_mindmap_and_countdown():
     assert pick["picker"] == {"options": ["Pizza", "Tacos", "Curry"]}
     with pytest.raises(ValueError):
         build_artifact({"kind": "picker", "title": "x", "items": [{"label": "only"}]})
+    # the local model's own shapes for "flip a coin" (2026-11-14 battery: both failed before)
+    coin = {"kind": "picker", "title": "Coin Flip", "highlight": "pick", "points": [{"label": "Heads"}, {"label": "Tails"}]}
+    assert build_artifact(coin)["picker"] == {"options": ["Heads", "Tails"]}
+    assert build_artifact({"kind": "picker", "title": "Coin", "options": ["Heads", "Tails"]})["picker"] == {"options": ["Heads", "Tails"]}
+    # a study plan sent as chart points (value = day number, not "done")
+    plan = build_artifact({"kind": "checklist", "title": "Chem plan", "points": [{"label": "Sat: mechanisms", "value": 1}, {"label": "Sun: stoichiometry", "value": 2}]})
+    assert plan["checklist"] == [{"label": "Sat: mechanisms", "done": False}, {"label": "Sun: stoichiometry", "done": False}]
     tree = build_artifact({"kind": "mindmap", "title": "Photosynthesis", "items": [
         {"label": "Light reactions", "group": "Stages"}, {"label": "Calvin cycle", "group": "Stages"},
         {"label": "Chlorophyll", "group": "Needs", "detail": "absorbs light"}, {"label": "Glucose"}]})

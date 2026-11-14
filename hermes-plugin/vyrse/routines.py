@@ -27,6 +27,7 @@ SCHEMA: Dict[str, Any] = {
     "description": (
         "One-phrase routines. action=create: name (the phrase that runs it, e.g. 'movie night') + steps (YOU write them "
         "from what the user described: what to do, in order, naming the VYRSE tool for each); delete (name); list. "
+        "'When I say X, do Y' / 'whenever I say X …' is a request to CREATE routine X now (do not do Y yet). "
         "Running one: when the user says a routine's name, do its steps with your tools, then confirm in one line."
     ),
     "parameters": {

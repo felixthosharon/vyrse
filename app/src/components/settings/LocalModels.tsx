@@ -291,8 +291,11 @@ export function LocalModels({ open }: { open: boolean }) {
         {problem && <p role="alert" className="text-[11px] leading-relaxed text-destructive">{problem}</p>}
         <p className="flex items-start gap-2 text-[10px] leading-relaxed text-muted-foreground">
           <Cpu className="mt-0.5 size-3 shrink-0" strokeWidth={1.6} />
-          Models come from Hugging Face and are 2 to 8 GB. Already have a <span className="font-mono">.gguf</span> file? Drop it into{" "}
-          {agent?.modelsDir ? <span className="break-all font-mono">{agent.modelsDir}</span> : "your VYRSE models folder"}.
+          {/* one text block: as direct flex children, the words and code pieces were laid out as separate columns */}
+          <span className="min-w-0">
+            Models come from Hugging Face and are 2 to 8 GB. Already have a <span className="font-mono">.gguf</span> file? Drop it into{" "}
+            {agent?.modelsDir ? <span className="break-all font-mono">{agent.modelsDir}</span> : "your VYRSE models folder"}.
+          </span>
         </p>
       </div>
     </div>

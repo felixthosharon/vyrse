@@ -208,8 +208,11 @@ def _items(p: Dict[str, Any], limit: int) -> List[Dict[str, Any]]:
         return [{"label": c, "value": v, **({"unit": p["unit"]} if p.get("unit") and p.get("kind") != "stats" else {})}
                 for c, v in zip(cols, rows[0])][:limit]
     raw = [i for i in (p.get("items") or []) if i not in ({}, None)] or (p.get("rows") or [])
-    if not raw and p.get("kind") in ("stats", "status", "gauges", "rings", "heatmap", "quiz"):
+    if not raw and p.get("kind") in ("stats", "status", "gauges", "rings", "heatmap", "quiz", "picker", "checklist"):
         raw = [i for i in (p.get("points") or []) if isinstance(i, dict)]  # chart-shaped label/value points
+    if not raw and p.get("kind") == "picker":
+        # "flip a coin" from the local model: points=[{label: Heads}, …] (above) or options/choices=["Heads", "Tails"]
+        raw = [i for i in (p.get("options") or p.get("choices") or []) if i not in ({}, None, "")]
     for i in raw[:limit]:
         if isinstance(i, dict):
             out.append(i)

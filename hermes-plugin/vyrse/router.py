@@ -31,9 +31,33 @@ _RECORD = re.compile(r"\brecord (?:this|the|my|a)? ?(?:lecture|class|lesson|meet
 _WEATHER = re.compile(r"\b(?:weather|forecast|temperature outside|(?:will|is) it (?:going to )?(?:rain|be (?:hot|cold|sunny)))\b", re.I)
 _REWIND = re.compile(r"\bwhat (?:was|were) i (?:doing|working on|watching|up to)\b|\bwhat did i (?:do|have open)\b", re.I)
 
+# 2026-11-14 battery: "tidy my desktop" went to the file organizer (no windows touched); "when i say im heading out,
+# save my work and lock my pc" saved and locked at once instead of making the routine.
+_TIDY = re.compile(r"\b(?:tidy|clean|sort|organi[sz]e|arrange)(?: up| out)?\s+(?:my |the |all (?:my |the )?)?"
+                   r"(?:desktop|windows|screen)\b(?!\s+(?:files?|icons?|folders?|shortcuts?))", re.I)
+_ROUTINE = re.compile(r"^\s*(?:(?:so |ok(?:ay)? |yo )?(?:when(?:ever)?|if|each time|every time) i say)\b", re.I)
+
+# 2026-11-15: "play lofi on spotify" only pressed play/pause (there was no search); "how much have you saved me"
+# had no source (the figure was only in Settings).
+_PLAY = re.compile(r"^\s*(?:(?:can|could) you |pls |please |yo )?(?:play|put on|throw on|queue up|start playing)\s+"
+                   r"(?!(?:it|this|that|music|the music|some music|the song|spotify|a game|games?|with)\W*$)"
+                   r"(?!(?:a |some |the )?games?\b|with\b)\S.{0,80}$", re.I)
+_SAVINGS = re.compile(r"\b(?:how much|what) (?:money |cash )?(?:have|has|did|do) (?:you|vyrse|u) (?:saved?|save)\b|"
+                      r"\bsav(?:ed|ings) (?:me|on|by)\b|\bmy savings\b|\bhow much (?:would|did) (?:it|this|that|chatgpt|claude|the api) (?:have )?cost", re.I)
+
 _HOW_TO = re.compile(r"\s*(?:how (?:do|can|to|would|should)|what(?:'s| is) the (?:way|shortcut|key)|which (?:key|shortcut))\b", re.I)
 
 HINTS = (
+    (_ROUTINE, "[A new routine: vyrse_routine action=create name=<the phrase they'll say> steps=<what they described, "
+               "in order, naming the VYRSE tool for each>. It isn't saved yet: call vyrse_routine BEFORE saying it's set up. "
+               "Don't do the steps now.]"),
+    (_TIDY, "[Tidy the open windows: vyrse_desktop action=tidy (lays them out side by side in one go; closes nothing). "
+            "Not the file organizer: only sort files if they said files, icons or folders.]"),
+    (_PLAY, "[If this is music: vyrse_controls action=play query=<the song, artist, playlist or mood> (searches Spotify "
+            "and starts it). Not action=media: that only toggles what's loaded. Say what it reports is playing. "
+            "If it's a game or an app, open it instead.]"),
+    (_SAVINGS, "[Money saved: vyrse_system action=savings (days=30 default, 7 for this week, 365 for all time). Give "
+               "the dollar figure it returns.]"),
     (_MEDIA, "[Music/volume: do it with vyrse_controls now (action=media play_pause/next/previous, or volume). "
              "You haven't done it yet; call the tool before saying it's done.]"),
     (_RECORD, "[Start recording now: vyrse_notes action=record (title optional: use what they called it, or none). "
@@ -58,7 +82,7 @@ def hint_for(text: str) -> Optional[str]:
     # "how do I take a screenshot?" asks for the way, not for one to be taken
     how_to = bool(_HOW_TO.match(text))
     for pattern, hint in HINTS:
-        if how_to and pattern in (_SHOT, _RECORD, _EMAIL, _MEDIA):
+        if how_to and pattern in (_SHOT, _RECORD, _EMAIL, _MEDIA, _PLAY):
             continue
         if pattern.search(text):
             return hint

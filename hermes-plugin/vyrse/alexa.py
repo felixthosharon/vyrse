@@ -28,7 +28,8 @@ SCHEMA: Dict[str, Any] = {
         "Control the user's Amazon Echo / Alexa. action=command runs any Alexa request as text on the Echo, "
         "exactly as if the user said it to Alexa (smart home, music, timers, Alexa skills): text is the request "
         "WITHOUT the word 'Alexa', e.g. 'turn off the bedroom lights'. action=say makes the Echo speak text out "
-        "loud. action=routine runs an Alexa routine by name. action=devices lists Echo devices. device = Echo "
+        "loud: use it for 'make the Echo say …', 'announce …', 'tell everyone … on the Echo' (text = the words to "
+        "say, e.g. \"Dinner's ready\"), never action=command for those. action=routine runs an Alexa routine by name. action=devices lists Echo devices. device = Echo "
         "name (optional, defaults to the main one)."
     ),
     "parameters": {

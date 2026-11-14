@@ -551,12 +551,25 @@ def test_everyday_requests_get_pointed_at_the_right_tool():
         "search the web for the price of the latest iPhone": "web_search", "who won the match yesterday": "web_search",
         "take a screenshot": "save=true", "write an email to my teacher saying I'll be late": "mail.google.com",
         "what was I doing yesterday afternoon?": "rewind",
+        # 2026-11-14 battery
+        "tidy my desktop": "action=tidy", "clean up my windows": "action=tidy", "organise my screen pls": "action=tidy",
+        "when i say im heading out, save my work and lock my pc": "vyrse_routine action=create",
+        "whenever i say movie night dim my screen": "vyrse_routine action=create",
+        # 2026-11-15: search-and-play, and the savings figure in chat
+        "play lofi on spotify": "action=play", "play blinding lights": "action=play",
+        "can you put on some taylor swift": "action=play", "play my chill playlist": "action=play",
+        "how much have you saved me": "action=savings", "how much money did vyrse save me this month?": "action=savings",
+        "what are my savings": "action=savings",
     }
     for said, tool in cases.items():
         assert tool in (hint_for(said) or ""), said
     for said in ("hi", "tell me a joke", "explain quantum computing simply", "what's 15% of 240?", "play a game with me"):
         assert hint_for(said) is None, said
-    ctx = pre_llm_call(platform="vyrse", user_message="what time is it")
+    assert "action=tidy" not in (hint_for("tidy my desktop files into folders") or "")
+    assert "routine" not in (hint_for("im heading out") or "")
+    for said in ("play music", "play it", "play spotify", "play games with me", "how do i play this song"):
+        assert "action=play" not in (hint_for(said) or ""), said
+    ctx =pre_llm_call(platform="vyrse", user_message="what time is it")
     assert ctx and ctx["context"].startswith("[Now: ")
 
 

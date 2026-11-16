@@ -353,6 +353,8 @@ export function VyrseProvider({ children }: { children: ReactNode }) {
       const rows = await refreshList();
       if (resumedOnce.current) return;
       resumedOnce.current = true;
+      // developer test runs (hidden window) must never add to the user's real conversations
+      if (new URLSearchParams(window.location.search).get("test") === "1") return;
       // Continue the latest conversation that has something in it (never an empty placeholder).
       const sorted = [...rows].sort((a, b) => b.updatedAt - a.updatedAt);
       const latest = sorted.find((r) => (r.messageCount ?? 1) > 0) ?? sorted[0];

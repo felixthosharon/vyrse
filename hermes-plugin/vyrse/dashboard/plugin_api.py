@@ -318,6 +318,59 @@ async def mic_test(body: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
     return await asyncio.to_thread(_score_and_save, raw)
 
 
+# Hermes drops whole transcripts that are only "okay", "thanks", "thank you" or "bye" (Whisper can invent them
+# from silence). VYRSE only sends audio its own speech detector heard, and Hermes' VAD and confidence gate still
+# apply, so these short answers are real ("Want me to search the whole PC?" "Okay.") and are kept.
+KEEP_SHORT_ANSWERS = {"okay", "ok", "thanks", "thank you", "bye", "bye bye", "okay thanks", "ok thanks"}
+
+
+def keep_transcript(text: str) -> str:
+    from tools.voice_mode_transcript import is_whisper_hallucination
+
+    cleaned = " ".join(text.lower().replace(",", " ").strip(" .!?").split())
+    if is_whisper_hallucination(text) and cleaned not in KEEP_SHORT_ANSWERS:
+        return ""
+    return text.strip()
+
+
+@router.post("/transcribe")
+async def transcribe(body: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
+    """Speech to text for VYRSE's voice: Hermes' own transcription (local faster-whisper, VAD, confidence gate),
+    with short answers kept (see KEEP_SHORT_ANSWERS). Same request and reply as /api/audio/transcribe."""
+    data_url = str(body.get("data_url") or "")
+    if not data_url.startswith("data:") or ";base64," not in data_url:
+        raise HTTPException(status_code=400, detail="send a base64 data_url")
+    raw = base64.b64decode(data_url.split(",", 1)[1], validate=False)
+    if not raw or len(raw) > 25 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="empty or too large recording")
+    return await asyncio.to_thread(_transcribe_bytes, raw, str(body.get("mime_type") or "audio/wav"))
+
+
+def _transcribe_bytes(raw: bytes, mime: str) -> Dict[str, Any]:
+    import os
+    import tempfile
+
+    from tools.transcription_tools import transcribe_audio
+
+    suffix = ".wav" if "wav" in mime else ".webm" if "webm" in mime else ".ogg" if "ogg" in mime else ".wav"
+    fd, path = tempfile.mkstemp(prefix="vyrse-voice-", suffix=suffix)
+    try:
+        with os.fdopen(fd, "wb") as f:
+            f.write(raw)
+        result = transcribe_audio(path, source="voice_mode")
+    finally:
+        try:
+            os.unlink(path)
+        except OSError:
+            pass
+    if not result.get("success"):
+        err = str(result.get("error") or "Transcription failed")
+        if result.get("no_speech") or "empty transcript" in err.lower():
+            return {"ok": True, "transcript": "", "provider": result.get("provider")}
+        return {"ok": False, "error": err}
+    return {"ok": True, "transcript": keep_transcript(str(result.get("transcript") or "")), "provider": result.get("provider")}
+
+
 def _score_and_save(raw: bytes) -> Dict[str, Any]:
     import numpy as np
     from hermes_constants import get_hermes_home

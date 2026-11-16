@@ -56,8 +56,10 @@ export function createMainWindow(rendererUrl: string | undefined, rendererIndex:
     return { action: 'deny' }
   })
 
-  if (rendererUrl) void win.loadURL(rendererUrl)
-  else void win.loadFile(rendererIndex)
+  // A hidden test run starts on a new conversation instead of continuing the user's latest one.
+  const query = offscreen ? { test: '1' } : undefined
+  if (rendererUrl) void win.loadURL(offscreen ? `${rendererUrl}${rendererUrl.includes('?') ? '&' : '?'}test=1` : rendererUrl)
+  else void win.loadFile(rendererIndex, query ? { query } : undefined)
   return win
 }
 

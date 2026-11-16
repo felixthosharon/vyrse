@@ -78,13 +78,17 @@ async function main(): Promise<void> {
 
   if (smoke === 'script') {
     const win = createMainWindow(rendererUrl, rendererIndex)
-    attachOrb(win, rendererUrl, rendererIndex)
-    attachTalkShortcut(win)
-    attachDictation(win)
-    attachAlexa(win)
-    attachEchoSkill(win)
-    attachQuickAsk(win, rendererUrl, rendererIndex)
-    attachPhoneBridge(win, backend)
+    // A hidden test run must not reach the user: no orb on their screen, no global shortcuts taking their keys,
+    // no phone or Echo connecting to this copy instead of the real one.
+    if (process.env.VYRSE_SMOKE_HIDDEN !== '1') {
+      attachOrb(win, rendererUrl, rendererIndex)
+      attachTalkShortcut(win)
+      attachDictation(win)
+      attachAlexa(win)
+      attachEchoSkill(win)
+      attachQuickAsk(win, rendererUrl, rendererIndex)
+      attachPhoneBridge(win, backend)
+    }
     attachExtras(win)
     win.webContents.on('console-message', d => {
       if (d.level === 'warning' || d.level === 'error' || d.message.startsWith('[vyrse:voice]'))

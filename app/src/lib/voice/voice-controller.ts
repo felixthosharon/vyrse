@@ -91,6 +91,12 @@ export class VoiceController {
   private speech: SpeechStream | null = null;
   private unsubscribers: (() => void)[] = [];
   private enabled = false;
+  /** voice is switched on, even while there's no mic to open */
+  private wanted = false;
+  private waitingForMic = false;
+  private usingFallback = false;
+  private listeningForDevices = false;
+  private retrying = false;
 
   constructor(
     private readonly backend: VoiceBackend,
@@ -122,14 +128,27 @@ export class VoiceController {
   async enable(): Promise<void> {
     if (this.enabled) return;
     this.enabled = true;
+    this.wanted = true;
     try {
-      await this.mic.start(this.settings.deviceId, this.settings.autoGain, !IS_PHONE);
+      await this.openMic();
     } catch (err) {
       this.enabled = false;
       this.setPhase("off");
-      this.callbacks.onError(micError(err));
+      if (isMissingMic(err)) {
+        // No mic right now (a controller that's off, a headset not plugged in): say so once, then start by
+        // itself the moment one is connected instead of staying off until the user toggles voice.
+        if (!this.waitingForMic) this.callbacks.onError("No microphone was found. VYRSE will start listening as soon as one is connected.");
+        this.waitForMic();
+      } else {
+        this.wanted = false;
+        this.callbacks.onError(micError(err));
+      }
       return;
     }
+    this.waitingForMic = false;
+    // on the fallback mic, keep watching so VYRSE moves back to the chosen one when it reappears
+    this.watchDevices(this.usingFallback);
+    this.mic.onLost = () => void this.micLost();
     this.unsubscribers.push(
       this.mic.onFrame((frame) => this.onFrame(frame)),
       this.backend.onWake(() => this.onWake()),
@@ -140,9 +159,66 @@ export class VoiceController {
     else await this.armIdle();
   }
 
+  /** The chosen mic, or the system default when the chosen one isn't there (its id changes when a device
+   *  reconnects differently, e.g. another USB port). */
+  private async openMic(): Promise<void> {
+    const chosen = this.settings.deviceId;
+    try {
+      await this.mic.start(chosen, this.settings.autoGain, !IS_PHONE);
+      this.usingFallback = false;
+    } catch (err) {
+      if (!chosen || chosen === "auto" || chosen === "default" || !isMissingMic(err)) throw err;
+      await this.mic.start("auto", this.settings.autoGain, !IS_PHONE);
+      this.usingFallback = true;
+      console.warn("[vyrse:mic] the chosen microphone isn't connected; using the default one");
+    }
+  }
+
+  private onDeviceChange = (): void => {
+    if (this.enabled) {
+      // back on the chosen mic once it reappears
+      if (this.usingFallback) void this.restart();
+      return;
+    }
+    if (!this.wanted || this.retrying) return;
+    this.retrying = true;
+    // Windows lists a device a moment before it can be opened.
+    setTimeout(() => {
+      this.retrying = false;
+      if (this.wanted && !this.enabled) void this.enable();
+    }, 800);
+  };
+
+  private watchDevices(on: boolean): void {
+    const devices = typeof navigator !== "undefined" ? navigator.mediaDevices : undefined;
+    if (!devices?.addEventListener || on === this.listeningForDevices) return;
+    if (on) devices.addEventListener("devicechange", this.onDeviceChange);
+    else devices.removeEventListener("devicechange", this.onDeviceChange);
+    this.listeningForDevices = on;
+  }
+
+  private waitForMic(): void {
+    this.waitingForMic = true;
+    this.watchDevices(true);
+  }
+
+  /** The open mic went away mid-session: tidy up, tell the user, and come back when a mic returns. */
+  private async micLost(): Promise<void> {
+    if (!this.enabled) return;
+    await this.disable();
+    this.wanted = true;
+    this.callbacks.onError("The microphone was disconnected. VYRSE will listen again when it's back.");
+    this.waitForMic();
+    this.onDeviceChange(); // another mic may already be there
+  }
+
   async disable(): Promise<void> {
+    this.wanted = false;
+    this.waitingForMic = false;
+    this.watchDevices(false);
     if (!this.enabled) return;
     this.enabled = false;
+    this.mic.onLost = null;
     this.unsubscribers.splice(0).forEach((off) => off());
     this.stopSpeaking();
     await this.backend.stopWake();
@@ -151,10 +227,18 @@ export class VoiceController {
     this.setPhase("off");
   }
 
+  /** Open the mic for a request the user just made; if it's still missing, say so (they pressed something). */
+  private async ensureEnabled(): Promise<boolean> {
+    if (this.enabled) return true;
+    const alreadyWaiting = this.waitingForMic;
+    await this.enable();
+    if (!this.enabled && alreadyWaiting) this.callbacks.onError("No microphone is connected yet.");
+    return this.enabled;
+  }
+
   /** Tap-to-talk: listen for one request now (also cancels the follow-up wait). */
   async listenNow(): Promise<void> {
-    if (!this.enabled) await this.enable();
-    if (!this.enabled) return;
+    if (!(await this.ensureEnabled())) return;
     this.stopSpeaking();
     this.startCapture(DEFAULT_ENDPOINTER.noSpeechTimeoutMs);
   }
@@ -175,8 +259,7 @@ export class VoiceController {
       void this.finishCapture();
       return;
     }
-    if (!this.enabled) await this.enable();
-    if (!this.enabled) return;
+    if (!(await this.ensureEnabled())) return;
     this.stopSpeaking();
     this.interruptedPhase = null;
     this.setDictating(true);
@@ -595,6 +678,11 @@ function isStrayWord(text: string): boolean {
 }
 
 const NAME_RE = /\bvyrse\b|\bwairz\b/i;
+
+function isMissingMic(err: unknown): boolean {
+  const name = (err as { name?: string })?.name;
+  return name === "NotFoundError" || name === "OverconstrainedError";
+}
 
 function micError(err: unknown): string {
   const name = (err as { name?: string })?.name;

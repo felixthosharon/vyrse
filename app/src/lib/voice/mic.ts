@@ -8,6 +8,8 @@ export class MicCapture {
   private stream: MediaStream | null = null;
   private node: AudioWorkletNode | null = null;
   private listeners = new Set<(frame: Float32Array) => void>();
+  /** called once when the open microphone goes away (unplugged, a controller switched off or asleep) */
+  onLost: (() => void) | null = null;
   /** 0..1 smoothed input level for the presence orb */
   level = 0;
   private floorDb = -60;
@@ -62,6 +64,12 @@ export class MicCapture {
     };
     source.connect(node);
     const track = stream.getAudioTracks()[0];
+    // Without this, a mic that disappears leaves VYRSE "listening" to nothing, and it never comes back.
+    if (track) {
+      track.onended = () => {
+        if (this.stream === stream) this.onLost?.();
+      };
+    }
     console.info(
       `[vyrse:mic] open ${context.sampleRate} Hz, context ${context.state}, ${track?.label ?? "?"} ${JSON.stringify(track?.getSettings?.() ?? {})}`,
     );

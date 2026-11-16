@@ -10,7 +10,12 @@ type Period = "7" | "30" | "365";
 
 const money = (n: number) => (n > 0 && n < 0.01 ? "under $0.01" : `$${n.toFixed(n >= 100 ? 0 : 2)}`);
 const count = (n: number) => (n >= 1_000_000 ? `${(n / 1_000_000).toFixed(1)} million` : n >= 10_000 ? `${Math.round(n / 1000)} thousand` : n.toLocaleString("en-US"));
+/** Token counts as people read them: 9,412 · 163.1K · 1.25M. */
+const tokens = (n: number) =>
+  n >= 1_000_000 ? `${(n / 1_000_000).toFixed(2).replace(/\.?0+$/, "")}M` : n >= 10_000 ? `${(n / 1000).toFixed(1).replace(/\.0$/, "")}K` : n.toLocaleString("en-US");
 /** Tokens are word pieces; about three quarters of a word each. */
+const read = (u: UsageSummary) => u.models.reduce((n, m) => n + m.inputTokens, 0);
+const written = (u: UsageSummary) => u.models.reduce((n, m) => n + m.outputTokens, 0);
 const words = (tokens: number) => count(Math.round((tokens * 0.75) / 100) * 100 || Math.round(tokens * 0.75));
 
 /**
@@ -62,15 +67,30 @@ export function UsageSection({ open }: { open: boolean }) {
               <p className="pt-1.5 text-[11px] leading-snug text-muted-foreground">charged by online models</p>
             </div>
           </div>
+          <div data-usage="tokens" className="rounded-2xl border border-border/70 bg-surface/40 px-3.5 py-3">
+            <div className="flex items-baseline justify-between gap-3">
+              <p className="font-display text-[22px] leading-none text-foreground">{tokens(current.tokens)}</p>
+              <p className="text-[11px] text-muted-foreground">tokens used</p>
+            </div>
+            <div className="mt-2.5 flex h-1.5 overflow-hidden rounded-full bg-border/60" aria-hidden>
+              {/* replies are tiny next to what's read; keep a visible sliver for them */}
+              <div className="min-w-0 flex-1 bg-primary" />
+              {written(current) > 0 && <div className="shrink-0 bg-foreground/50" style={{ width: `max(4px, ${(100 * written(current)) / Math.max(1, current.tokens)}%)` }} />}
+            </div>
+            <div className="mt-2 flex flex-wrap justify-between gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
+              <span><span className="mr-1 inline-block size-2 rounded-full bg-primary align-middle" />{tokens(read(current))} read</span>
+              <span><span className="mr-1 inline-block size-2 rounded-full bg-foreground/50 align-middle" />{tokens(written(current))} written</span>
+            </div>
+          </div>
           <p className="text-[11.5px] leading-relaxed text-foreground/90">
-            In {label} VYRSE read and wrote about {words(current.tokens)} words{current.messages ? ` across ${count(current.messages)} model calls` : ""}.
+            In {label} that's about {words(current.tokens)} words{current.messages ? ` across ${count(current.messages)} model calls` : ""}.
           </p>
           <ul className="space-y-1.5">
             {current.models.map((m) => (
               <li key={`${m.local}-${m.model}`} className="flex items-center justify-between gap-3 rounded-2xl border border-border/70 bg-surface/40 px-3 py-2">
                 <div className="min-w-0">
                   <p className="truncate text-[12.5px] text-foreground">{m.model}</p>
-                  <p className="font-mono text-[10px] text-muted-foreground">{m.local ? "on your PC" : "online"} · {words(m.inputTokens + m.outputTokens)} words</p>
+                  <p className="font-mono text-[10px] text-muted-foreground">{m.local ? "on your PC" : "online"} · {tokens(m.inputTokens + m.outputTokens)} tokens ({tokens(m.inputTokens)} read, {tokens(m.outputTokens)} written)</p>
                 </div>
                 <p className="shrink-0 text-right text-[12px]">
                   {m.local ? <span className="text-primary">{money(m.saved)} saved</span> : <span className="text-foreground">{m.paid > 0 ? `${money(m.paid)} charged` : "no charge found"}</span>}

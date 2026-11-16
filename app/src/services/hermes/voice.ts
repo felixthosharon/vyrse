@@ -58,10 +58,16 @@ export class HermesVoice implements VoiceBackend {
       reader.onerror = () => reject(reader.error);
       reader.readAsDataURL(wav);
     });
-    const res = await this.gateway.rest<{ ok?: boolean; transcript?: string; error?: string }>("/api/audio/transcribe", {
-      method: "POST",
-      body: JSON.stringify({ data_url: dataUrl, mime_type: "audio/wav" }),
-    });
+    const body = JSON.stringify({ data_url: dataUrl, mime_type: "audio/wav" });
+    type Result = { ok?: boolean; transcript?: string; error?: string };
+    let res: Result;
+    try {
+      // VYRSE's route keeps short answers ("okay", "thanks") that Hermes' own route drops as likely Whisper noise.
+      res = await this.gateway.rest<Result>("/api/plugins/vyrse/transcribe", { method: "POST", body });
+    } catch (err) {
+      if (!/\b404\b|not found/i.test(String((err as Error)?.message ?? err))) throw err;
+      res = await this.gateway.rest<Result>("/api/audio/transcribe", { method: "POST", body });
+    }
     if (res.ok === false) throw new Error(res.error || "transcription failed");
     return (res.transcript ?? "").trim();
   }

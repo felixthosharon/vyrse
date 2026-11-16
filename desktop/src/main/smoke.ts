@@ -5,6 +5,7 @@
 //   probe           create a "vyrse" session over the gateway, run one prompt (VYRSE_SMOKE_PROMPT or a terminal
 //                   echo), report events and tool calls, quit
 //   window          open the real UI window, screenshot it to VYRSE_SMOKE_SHOT, quit
+//   voice           TTS, STT and wake word through the real Hermes endpoints (see smoke-voice.ts)
 //   ui              type VYRSE_SMOKE_PROMPT into the real composer, wait for Hermes, screenshot, quit
 
 import { BrowserWindow } from 'electron'
@@ -14,6 +15,7 @@ import path from 'node:path'
 import type { BackendConnection, BackendStatus } from '../shared/backend-types'
 import { askVyrse } from './alexa-skill'
 import type { HermesBackend } from './hermes-backend'
+import { runVoiceSmoke } from './smoke-voice'
 
 export function runSmoke(mode: string, backend: HermesBackend, quit: (exitCode: number) => void): void {
   let crashInjected = false
@@ -39,6 +41,15 @@ export function runSmoke(mode: string, backend: HermesBackend, quit: (exitCode: 
         .then(() => quit(0))
         .catch(err => {
           console.log(`[smoke] battery failed: ${(err as Error).message}`)
+          quit(1)
+        })
+      return
+    }
+    if (mode === 'voice') {
+      runVoiceSmoke(conn, process.env.VYRSE_SMOKE_VOICE ?? '', process.env.VYRSE_SMOKE_OUT ?? path.join(process.cwd(), 'voice.jsonl'))
+        .then(() => quit(0))
+        .catch(err => {
+          console.log(`[smoke] voice failed: ${(err as Error).message}`)
           quit(1)
         })
       return

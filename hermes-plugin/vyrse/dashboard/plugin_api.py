@@ -422,6 +422,28 @@ def _memory():
     return _load("vyrse_plugin_memory_api", "dashboard/memory_api.py")
 
 
+def _controls():
+    return _load("vyrse_plugin_controls", "controls/__init__.py")
+
+
+def _now_playing(result: Dict[str, Any]) -> Dict[str, Any]:
+    return {k: result.get(k) for k in ("playing", "title", "artist", "album", "app")} | {"playing": bool(result.get("playing"))}
+
+
+@router.get("/media")
+async def media_now() -> Dict[str, Any]:
+    """What the PC is playing (for the now-playing pill)."""
+    return _now_playing(await asyncio.to_thread(_controls().run, {"action": "now_playing"}))
+
+
+@router.post("/media")
+async def media_send(body: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
+    command = str(body.get("command") or "")
+    if command not in ("play_pause", "next", "previous"):
+        raise HTTPException(status_code=400, detail="command must be play_pause, next or previous")
+    return _now_playing(await asyncio.to_thread(_controls().run, {"action": "media", "command": command}))
+
+
 @router.get("/memory")
 async def memory_list() -> Dict[str, Any]:
     return await asyncio.to_thread(_memory().listing)

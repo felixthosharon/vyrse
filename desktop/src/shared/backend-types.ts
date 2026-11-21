@@ -76,6 +76,9 @@ export const IPC_CHANNELS = {
   savePaste: 'vyrse:save-paste',
   installUpdate: 'vyrse:install-update',
   updateProgress: 'vyrse:update-progress',
+  setExplainShortcut: 'vyrse:set-explain-shortcut',
+  explainStart: 'vyrse:explain-start',
+  explainRegion: 'vyrse:explain-region',
 } as const
 
 /** This app's version and, after a check, the newest published release. */
@@ -222,6 +225,12 @@ export interface VyrseBridge {
     appInfo(check?: boolean): Promise<AppInfo | null>
     /** save a picture pasted from the clipboard; returns its path (null = not a picture VYRSE takes) */
     savePaste(mime: string, bytes: Uint8Array): Promise<string | null>
+    /** register the "What's this?" shortcut, or null to remove it; false = taken */
+    setExplainShortcut(accelerator: string | null): Promise<boolean>
+    /** start picking a part of the screen now (same as pressing the shortcut) */
+    explainStart(): void
+    /** the user boxed a part of the screen: the saved picture's path */
+    onExplainRegion(callback: (file: string) => void): () => void
     /** download the newer release, verify it, start its installer and quit */
     installUpdate(): Promise<{ ok: boolean; error?: string }>
     onUpdateProgress(callback: (progress: UpdateProgress) => void): () => void

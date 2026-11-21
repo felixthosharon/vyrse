@@ -251,6 +251,30 @@ def _alarm_card(at) -> None:
         pass
 
 
+_ALARM_SAID = re.compile(r"\balarms?\b|\bwake me\b|\bwake-?up call\b", re.I)
+
+
+def wants_an_alarm(params: Dict[str, Any], said: str) -> bool:
+    """Ring like an alarm? Yes when the user asked for an alarm or to be woken, whether or not the model set
+    alarm=true (2026-11-17: "set an alarm for 2:14 AM" was saved as a plain reminder and never rang). The model's
+    flag alone counts only when the user's words back it up, or aren't known."""
+    if params.get("action") != "create":
+        return False
+    if _ALARM_SAID.search(said or ""):
+        return True
+    flag = params.get("alarm") is True or str(params.get("alarm")).lower() == "true"
+    return bool(flag and (not said or re.search(r"\bwake\b|\bring\b", said, re.I)))
+
+
+def _label(prompt: str) -> str:
+    """A short name for a reminder the model didn't name: the start of what it says."""
+    text = re.sub(r"\s+", " ", prompt).strip().rstrip(".!")
+    text = re.sub(r"^(?:remind (?:me|the user|them) (?:to|about|that)|tell (?:me|the user|them) (?:to|that)|say)\s+", "", text, flags=re.I)
+    if len(text) > 40:
+        text = text[:40].rsplit(" ", 1)[0] + "…"
+    return (text[:1].upper() + text[1:]) or "Reminder"
+
+
 def handle(params: Dict[str, Any], **kw: Any) -> str:
     import json
 
@@ -264,7 +288,7 @@ def handle(params: Dict[str, Any], **kw: Any) -> str:
     alarm_at = None
     from .turn import said
 
-    wants_alarm = params.get("alarm") is True and (not said() or re.search(r"\balarm|\bwake\b|wake me|ring", said(), re.I))
+    wants_alarm = wants_an_alarm(params, said())
     if args.get("action") in ("create", "update") and args.get("schedule"):
         args["schedule"] = _one_time(_plain_time(str(args["schedule"])))
         if args["action"] == "update" and not re.search(r"\d{4}-\d\d-\d\dT", args["schedule"]):
@@ -273,6 +297,14 @@ def handle(params: Dict[str, Any], **kw: Any) -> str:
                 args["schedule"] = at.strftime("%Y-%m-%dT%H:%M:00")
     if args.get("action") == "create" and wants_alarm:
         alarm_at = _clock(str(args.get("schedule") or ""))
+        if alarm_at is None:
+            # the schedule was already turned into a date and time above ("2026-11-17T02:34:00")
+            try:
+                from datetime import datetime
+
+                alarm_at = datetime.fromisoformat(str(args.get("schedule") or ""))
+            except ValueError:
+                alarm_at = None
         if alarm_at is not None:
             args["schedule"] = alarm_at.strftime("%Y-%m-%dT%H:%M:00")
         when = alarm_at.strftime("%I:%M %p").lstrip("0") if alarm_at is not None else str(args.get("schedule") or "")
@@ -283,6 +315,9 @@ def handle(params: Dict[str, Any], **kw: Any) -> str:
     note = ""
     if args.get("action") == "create" and alarm_at is None:
         note = _repeat_rules(args, said())
+    if args.get("action") == "create" and not args.get("name") and args.get("prompt"):
+        # without a name Hermes labels the job with the start of its prompt (VYRSE's own framing text)
+        args["name"] = _label(str(args["prompt"]))
     if args.get("action") in ("create", "update"):
         args["deliver"] = "local"
         if args.get("prompt") and not str(args["prompt"]).startswith(_FRAME):

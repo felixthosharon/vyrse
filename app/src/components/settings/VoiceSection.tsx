@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import type { MicTestResult } from "@/lib/voice/voice-controller";
 import { useVyrse } from "@/lib/vyrse/store";
-import { TALK_SHORTCUTS, DICTATE_SHORTCUTS, QUICK_SHORTCUTS, type DictateShortcut, type QuickShortcut, type TalkShortcut } from "@/lib/vyrse/types";
+import { TALK_SHORTCUTS, DICTATE_SHORTCUTS, EXPLAIN_SHORTCUTS, QUICK_SHORTCUTS, type DictateShortcut, type ExplainShortcut, type QuickShortcut, type TalkShortcut } from "@/lib/vyrse/types";
 import { Dropdown, Row, Section, Segmented, Slider, SwitchRow } from "./controls";
 import { TALK_STYLES } from "@/lib/vyrse/talk-styles";
 import { IS_PHONE } from "@/services/phone";
@@ -106,6 +106,14 @@ export function VoiceSection() {
           onChange={(v) => setSettings({ quickShortcut: v })}
           label="Quick ask"
           options={(Object.keys(QUICK_SHORTCUTS) as QuickShortcut[]).map((k) => ({ value: k, label: QUICK_SHORTCUTS[k].label }))}
+        />
+      </Row>
+      <Row label="What's this?" hint="drag a box over anything on screen and VYRSE explains it">
+        <Dropdown
+          value={s.explainShortcut ?? "ctrl+alt+e"}
+          onChange={(v) => setSettings({ explainShortcut: v })}
+          label="What's this?"
+          options={(Object.keys(EXPLAIN_SHORTCUTS) as ExplainShortcut[]).map((k) => ({ value: k, label: EXPLAIN_SHORTCUTS[k].label }))}
         />
       </Row>
       <Row label="Dictate anywhere" hint="types what you say into any app · pause or press again to finish">

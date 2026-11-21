@@ -37,8 +37,9 @@ def weather(location: str = "") -> Optional[Dict[str, Any]]:
         location = ""
     place = urllib.parse.quote(location.strip()) if location.strip() else ""
     req = urllib.request.Request(f"https://wttr.in/{place}?format=j1", headers={"User-Agent": "curl/8 (VYRSE)"})
-    with urllib.request.urlopen(req, timeout=TIMEOUT_S) as resp:
-        data = json.loads(resp.read().decode("utf-8"))
+    from .net import fetch
+
+    data = json.loads(fetch(req, TIMEOUT_S).decode("utf-8"))
     now = (data.get("current_condition") or [{}])[0]
     today = (data.get("weather") or [{}])[0]
     area = (data.get("nearest_area") or [{}])[0]
@@ -79,8 +80,9 @@ def _feed(url: str) -> List[Dict[str, str]]:
     import xml.etree.ElementTree as ET
 
     req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 (VYRSE)"})
-    with urllib.request.urlopen(req, timeout=TIMEOUT_S) as resp:
-        root = ET.fromstring(resp.read())
+    from .net import fetch
+
+    root = ET.fromstring(fetch(req, TIMEOUT_S))
     out = []
     for item in root.iter("item"):
         raw = (item.findtext("title") or "").strip()

@@ -4,8 +4,11 @@ import type {
   ConnectorSignIn,
   LocalModelsApi,
   LocalModelsStatus,
+  MediaApi,
+  MediaCommand,
   MemoryApi,
   MemoryNotes,
+  NowPlayingInfo,
   ModelBuild,
   ModelJob,
   ModelRepo,
@@ -291,6 +294,19 @@ function friendlyConnectorError(error: string): string {
 }
 
 /* ------------------------------------------------------------------------------------------------ memory */
+
+/* ------------------------------------------------------------------------------------------------- media */
+
+export class HermesMedia implements MediaApi {
+  constructor(private readonly gateway: HermesGateway) {}
+
+  now(): Promise<NowPlayingInfo> {
+    return this.gateway.rest<NowPlayingInfo>("/api/plugins/vyrse/media");
+  }
+  send(command: MediaCommand): Promise<NowPlayingInfo> {
+    return this.gateway.rest<NowPlayingInfo>("/api/plugins/vyrse/media", { method: "POST", body: json({ command }) });
+  }
+}
 
 type MemoryResult = { ok: boolean; message?: string; memory: MemoryNotes };
 

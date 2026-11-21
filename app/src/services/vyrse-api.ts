@@ -268,6 +268,22 @@ export interface MemoryApi {
   remove(target: "user" | "memory", entry: string): Promise<{ ok: boolean; message?: string; memory: MemoryNotes }>;
 }
 
+/** What the PC is playing right now (Windows' media session: Spotify, a browser tab, any player). */
+export interface NowPlayingInfo {
+  playing: boolean;
+  title?: string;
+  artist?: string;
+  album?: string;
+  /** Windows' id of the app that is playing */
+  app?: string;
+}
+export type MediaCommand = "play_pause" | "next" | "previous";
+export interface MediaApi {
+  now(): Promise<NowPlayingInfo>;
+  /** presses the media key and returns what is playing afterwards */
+  send(command: MediaCommand): Promise<NowPlayingInfo>;
+}
+
 /** How much VYRSE was used, what it cost, and what the local model saved. Money is in US dollars. */
 export interface UsageSummary {
   days: number;
@@ -460,6 +476,8 @@ export interface VyrseApi {
   connections?: ConnectionsApi;
   /** The notes VYRSE keeps about you. */
   memory?: MemoryApi;
+  /** what the PC is playing, and the media keys (desktop backend only) */
+  media?: MediaApi;
   usage?: UsageApi;
 
   /** Interface control by Hermes and the shared interface-preference store (vyrse plugin). */

@@ -28,6 +28,7 @@ CHOICES: Dict[str, Tuple[str, ...]] = {
     "talkShortcut": ("ctrl+shift+space", "ctrl+alt+v", "alt+backquote", "f9", "off"),
     "dictateShortcut": ("ctrl+alt+d", "ctrl+shift+period", "f8", "off"),
     "quickShortcut": ("alt+space", "ctrl+alt+space", "alt+q", "off"),
+    "explainShortcut": ("ctrl+alt+e", "ctrl+alt+w", "f7", "off"),
     "glass": ("liquid", "subtle", "off"),
     "briefing": ("off", "start", "07:00", "08:00", "09:00", "10:00"),
     "talkStyle": ("normal", "vibe", "fam", "chill", "hype", "focus", "pro", "savage"),

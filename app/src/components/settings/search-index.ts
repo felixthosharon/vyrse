@@ -24,6 +24,7 @@ const ALL: SettingEntry[] = [
   { label: "Wake word “VYRSE”", page: "voice", keywords: "hey wake listen always hotword" },
   { label: "Talk shortcut", page: "voice", keywords: "push to talk hotkey keyboard", pc: true },
   { label: "Quick ask", page: "voice", keywords: "alt space bar popup", pc: true },
+  { label: "What's this?", page: "voice", keywords: "explain screen select box drag region shortcut snip what is this", pc: true },
   { label: "Dictate anywhere", page: "voice", keywords: "dictation type speech to text", pc: true },
   { label: "Voice output", page: "voice", keywords: "speaker headphones echo bluetooth sound device", pc: true },
   { label: "Microphone", page: "voice", keywords: "mic input headset", pc: true },

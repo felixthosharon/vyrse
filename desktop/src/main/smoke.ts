@@ -243,6 +243,8 @@ type Step =
   | { window: 'minimize' | 'restore' } // main window state
   | { orb: string } // log the floating orb's visibility; screenshot it to this file name when shown
   | { echoAsk: string } // a question as the verified Echo skill gateway would hand it to VYRSE; logs the spoken answer
+  | { windows: string } // log every other VYRSE window (orb, overlay, quick bar) and screenshot the visible ones to <name>-<n>.png
+  | { explain: [number, number, number, number] } // "What's this?": start the picker and drag this box (x, y, w, h) on it
 
 /**
  * Scripted UI check (script mode): VYRSE_SMOKE_STEPS is a JSON array of Steps run after the
@@ -309,6 +311,29 @@ export function runScript(win: BrowserWindow, backend: HermesBackend, steps: Ste
             const t0 = Date.now()
             const answer = await askVyrse(win, step.echoAsk)
             console.log(`[smoke] step ${i} echo answer after ${Math.round((Date.now() - t0) / 1000)}s: ${JSON.stringify(answer)}`)
+          } else if ('windows' in step) {
+            const others = BrowserWindow.getAllWindows().filter(o => o !== win && !o.isDestroyed())
+            for (const [n, o] of others.entries()) {
+              console.log(`[smoke] step ${i} window ${n}: "${o.getTitle()}" visible=${o.isVisible()} ${JSON.stringify(o.getBounds())}`)
+              if (o.isVisible()) fs.writeFileSync(path.join(dir, `${step.windows}-${n}.png`), (await o.webContents.capturePage()).toPNG())
+            }
+          } else if ('explain' in step) {
+            const [x, y, w, h] = step.explain
+            await js(`window.vyrse.desktop.explainStart(), true`)
+            let picker: BrowserWindow | undefined
+            for (let n = 0; n < 40 && !picker; n++) {
+              await sleep(250)
+              picker = BrowserWindow.getAllWindows().find(o => o !== win && !o.isDestroyed() && o.webContents.getURL().startsWith('data:text/html') && o.isVisible())
+            }
+            console.log(`[smoke] step ${i} explain picker: ${picker ? JSON.stringify(picker.getBounds()) : 'NOT SHOWN'}`)
+            if (!picker) throw new Error('the selection window never appeared')
+            await sleep(400)
+            picker.webContents.sendInputEvent({ type: 'mouseDown', x, y, button: 'left', clickCount: 1 })
+            picker.webContents.sendInputEvent({ type: 'mouseMove', x: x + Math.round(w / 2), y: y + Math.round(h / 2) })
+            picker.webContents.sendInputEvent({ type: 'mouseMove', x: x + w, y: y + h })
+            await sleep(150)
+            picker.webContents.sendInputEvent({ type: 'mouseUp', x: x + w, y: y + h, button: 'left', clickCount: 1 })
+            await sleep(800)
           } else if ('waitFor' in step) {
             const t0 = Date.now()
             let ok = false

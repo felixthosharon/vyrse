@@ -75,6 +75,9 @@ export interface VyrseBridge {
     appInfo?(check?: boolean): Promise<AppInfo | null>;
     /** save a picture pasted from the clipboard; returns its path */
     savePaste?(mime: string, bytes: Uint8Array): Promise<string | null>;
+    setExplainShortcut?(accelerator: string | null): Promise<boolean>;
+    explainStart?(): void;
+    onExplainRegion?(callback: (file: string) => void): () => void;
     /** download the newer release, verify it, start its installer and quit */
     installUpdate?(): Promise<{ ok: boolean; error?: string }>;
     onUpdateProgress?(callback: (progress: UpdateProgress) => void): () => void;

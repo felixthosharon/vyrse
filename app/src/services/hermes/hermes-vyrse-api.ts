@@ -4,7 +4,7 @@ import { HermesClarify } from "./clarify";
 import type { VyrseBridge } from "./bridge";
 import { HermesGateway } from "./gateway";
 import { HermesProviders } from "./providers";
-import { HermesConnections, HermesLocalModels, HermesMemory, HermesUsage } from "./extras";
+import { HermesConnections, HermesLocalModels, HermesMedia, HermesMemory, HermesUsage } from "./extras";
 import { IS_PHONE } from "../phone";
 import { HermesSessions } from "./sessions";
 import { HermesSettings } from "./settings";
@@ -165,6 +165,7 @@ export function createHermesVyrseApi(bridge: VyrseBridge): VyrseApi & { gateway:
     },
     ...(IS_PHONE ? {} : { accounts, localModels: new HermesLocalModels(gateway), connections: new HermesConnections(gateway) }),
     memory: new HermesMemory(gateway),
+    media: new HermesMedia(gateway),
     usage: new HermesUsage(gateway),
     voice,
     reminders: {

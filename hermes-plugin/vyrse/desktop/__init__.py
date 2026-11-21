@@ -136,6 +136,12 @@ def handle(params: Dict[str, Any], **_: Any) -> str:
                 result["opened"] = "Untitled (a new blank tab)"
                 result["note"] = "It reopened old tabs, so I made a new blank one; type there."
             _last_window = str(result.get("app") or target)
+            # "open notepad and type hello world": a small model opens it, says "now let me type" and stops
+            from ..turn import said
+
+            if re.search(r"\b(?:and|then)\b.{0,40}\b(?:type|write|paste|put|enter|draft|note down|search)\b", said(), re.I | re.S):
+                result["next"] = ("They asked for more in this app. Do it NOW with another vyrse_desktop call "
+                                  "(action=type, text=<what they said>) before you reply.")
         elif action == "focus" and result.get("ok"):
             _last_window = str(request.get("window") or "")
         return json.dumps(result, ensure_ascii=False)

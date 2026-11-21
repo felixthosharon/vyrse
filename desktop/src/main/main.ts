@@ -9,6 +9,7 @@ import { captureWindow, driveUi, runScript, runSmoke } from './smoke'
 import { attachTalkShortcut } from './hotkey'
 import { attachExtras } from './extras'
 import { attachDictation } from './dictation'
+import { attachExplain } from './explain'
 import { attachAlexa } from './alexa'
 import { attachEchoSkill } from './alexa-skill'
 import { attachQuickAsk } from './quick'
@@ -84,10 +85,12 @@ async function main(): Promise<void> {
       attachOrb(win, rendererUrl, rendererIndex)
       attachTalkShortcut(win)
       attachDictation(win)
+      attachExplain(win)
       attachAlexa(win)
       attachEchoSkill(win)
       attachQuickAsk(win, rendererUrl, rendererIndex)
       attachPhoneBridge(win, backend)
+      attachOverlay(win, rendererUrl, rendererIndex, backend)
     }
     attachExtras(win)
     win.webContents.on('console-message', d => {
@@ -130,6 +133,7 @@ async function main(): Promise<void> {
     attachOrb(mainWindow, rendererUrl, rendererIndex)
     attachTalkShortcut(mainWindow)
     attachDictation(mainWindow)
+    attachExplain(mainWindow)
     attachAlexa(mainWindow)
     attachEchoSkill(mainWindow)
     attachQuickAsk(mainWindow, rendererUrl, rendererIndex)

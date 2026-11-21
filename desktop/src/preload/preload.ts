@@ -49,6 +49,9 @@ const CH = {
   savePaste: 'vyrse:save-paste',
   installUpdate: 'vyrse:install-update',
   updateProgress: 'vyrse:update-progress',
+  setExplainShortcut: 'vyrse:set-explain-shortcut',
+  explainStart: 'vyrse:explain-start',
+  explainRegion: 'vyrse:explain-region',
 } as const
 
 const bridge: VyrseBridge = {
@@ -137,6 +140,13 @@ const bridge: VyrseBridge = {
     },
     appInfo: check => ipcRenderer.invoke(CH.appInfo, check === true) as Promise<AppInfo | null>,
     savePaste: (mime, bytes) => ipcRenderer.invoke(CH.savePaste, mime, bytes) as Promise<string | null>,
+    setExplainShortcut: accelerator => ipcRenderer.invoke(CH.setExplainShortcut, accelerator) as Promise<boolean>,
+    explainStart: () => ipcRenderer.send(CH.explainStart),
+    onExplainRegion(callback) {
+      const listener = (_event: IpcRendererEvent, file: string) => callback(file)
+      ipcRenderer.on(CH.explainRegion, listener)
+      return () => ipcRenderer.removeListener(CH.explainRegion, listener)
+    },
     installUpdate: () => ipcRenderer.invoke(CH.installUpdate) as Promise<{ ok: boolean; error?: string }>,
     onUpdateProgress(callback) {
       const listener = (_event: IpcRendererEvent, progress: UpdateProgress) => callback(progress)

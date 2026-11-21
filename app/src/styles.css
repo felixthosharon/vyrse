@@ -468,6 +468,19 @@
 
 /* --- entrance choreography ------------------------------------------------ */
 
+/* the three little bars of the now-playing pill */
+@keyframes vyr-eq {
+  0%, 100% { height: 3px; }
+  50% { height: 13px; }
+}
+.now-playing-bar {
+  height: 3px;
+  animation: vyr-eq 1.05s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .now-playing-bar { animation: none; height: 9px; }
+}
+
 @keyframes vyr-settle {
   0% {
     opacity: 0;

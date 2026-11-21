@@ -36,8 +36,12 @@ import { isAlarm, isDecline } from "./alarm";
 import { configureUiSounds, playUiSound, preloadUiSounds, startAlarm, stopAlarm } from "./ui-sounds";
 import { makeMessage, newId } from "./mock-ai";
 import { loadSettings, saveSettings } from "./settings/storage";
+import { MEDIA_CHANGED, TURN_DONE } from "./media-events";
+
+/** What VYRSE is asked about a part of the screen the user boxed with the "What's this?" shortcut. */
+export const EXPLAIN_PROMPT = "What's this? Explain it in a few sentences.";
 import { findConversation, INITIAL_STATE, titleFrom, turnActivity, vyrseReducer, type VyrseAction } from "./state";
-import { TALK_SHORTCUTS, DICTATE_SHORTCUTS, QUICK_SHORTCUTS, type Artifact, type Conversation, type PresenceState, type PresentationMode, type Settings } from "./types";
+import { TALK_SHORTCUTS, DICTATE_SHORTCUTS, EXPLAIN_SHORTCUTS, QUICK_SHORTCUTS, type Artifact, type Conversation, type PresenceState, type PresentationMode, type Settings } from "./types";
 
 interface VyrseContextValue {
   settings: Settings;
@@ -1174,8 +1178,10 @@ export function VyrseProvider({ children }: { children: ReactNode }) {
             if (event.type === "tool" && event.phase === "end" && !/error|fail|not (?:installed|saved)|cancel/i.test(event.summary ?? "") &&
                 (event.name === "skill_manage" || (event.name === "vyrse_skills" && /install/i.test(event.summary ?? ""))))
               playUiSound("learned");
+            if (event.type === "tool" && event.phase === "end" && event.name === "vyrse_controls") window.dispatchEvent(new Event(MEDIA_CHANGED));
             dispatch({ type: "turn/event", event });
           }
+          window.dispatchEvent(new Event(TURN_DONE));
           finishVoice(false);
           // Adapters must end with done/error; treat a silent end as interrupted if we aborted.
           dispatch(
@@ -1362,6 +1368,28 @@ export function VyrseProvider({ children }: { children: ReactNode }) {
   );
 
   // "switch to fam mode", "vibe mode off", "gaming mode": applied instantly, never sent to the model.
+  // "What's this?" (desktop): a system-wide shortcut; the user boxes part of the screen and VYRSE explains it.
+  const explainShortcut = state.settings.explainShortcut ?? "ctrl+alt+e";
+  useEffect(() => {
+    const desktop = getDesktopBridge()?.desktop;
+    if (!desktop?.setExplainShortcut) return;
+    const choice = EXPLAIN_SHORTCUTS[explainShortcut] ?? EXPLAIN_SHORTCUTS["ctrl+alt+e"];
+    void desktop.setExplainShortcut(choice.accelerator).then((ok) => {
+      if (!ok) dispatch({ type: "toast/set", toast: `${choice.label} is already used by another app. Pick another "What's this?" shortcut in Settings → Voice.` });
+    });
+  }, [explainShortcut]);
+  useEffect(() => {
+    const desktop = getDesktopBridge()?.desktop;
+    if (!desktop?.onExplainRegion) return;
+    return desktop.onExplainRegion((file) => {
+      if (stateRef.current.turn) {
+        dispatch({ type: "toast/set", toast: "VYRSE is busy with a request; try that again in a moment." });
+        return;
+      }
+      send(EXPLAIN_PROMPT, { attachments: [{ path: file, name: "Screen selection" }] });
+    });
+  }, [send]);
+
   const sendOrCommand = useCallback(
     (raw: string, options: SendOptions = {}) => {
       const command = options.attachments?.length ? null : parseStyleCommand(raw);

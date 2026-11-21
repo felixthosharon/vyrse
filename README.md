@@ -15,6 +15,9 @@ your conversations, memory and voice never leave your machine unless you connect
   yours in about a minute), tap-to-talk, a push-to-talk shortcut, and replies spoken by a natural local voice.
 - **Runs your PC.** Opens apps and types into them, finds files instantly, controls music, volume and
   brightness, reads what's on screen, browses the web, sets reminders and routines, gives a daily briefing.
+- **"What's this?"** Press Ctrl + Alt + E, drag a box over anything on your screen (an error, a chart, a setting)
+  and VYRSE explains it.
+- **Now playing.** A small pill shows the song that is playing on your PC, with previous, play/pause and next.
 - **Your phone, too.** The Android app is the same VYRSE (orb, glass, chat, voice) using your PC's AI over your
   home Wi-Fi. Your PC can ring the phone, read its notifications, use the flashlight, and (if you allow it)
   fully operate it: tap, type, open apps.

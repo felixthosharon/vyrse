@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ArrowRight, Captions, Cpu, History, Mic, Moon, PanelRight, Plus, Settings2, Sparkles, Sun, Trash2, UserRound, Wand2 } from "lucide-react";
+import { ArrowRight, Captions, Cpu, History, Mic, Moon, PanelRight, Plus, ScanSearch, Settings2, Sparkles, Sun, Trash2, UserRound, Wand2 } from "lucide-react";
 import { useVyrse } from "@/lib/vyrse/store";
 import { IS_PHONE } from "@/services/phone";
+import { getDesktopBridge } from "@/services/hermes/bridge";
 import { TALK_STYLES } from "@/lib/vyrse/talk-styles";
 import { cn } from "@/lib/utils";
 import { SETTINGS_INDEX } from "./settings/search-index";
@@ -53,6 +54,14 @@ export function CommandPalette() {
       ...(IS_PHONE
         ? []
         : [
+            {
+              id: "explain",
+              label: "What's this? Explain part of my screen",
+              icon: ScanSearch,
+              keywords: "drag box select region screenshot explain snip what is this",
+              // after the palette has closed, so it isn't in the picture
+              run: () => window.setTimeout(() => getDesktopBridge()?.desktop?.explainStart?.(), 250),
+            },
             v.captionsOn
               ? { id: "cc-stop", label: "Stop live captions", icon: Captions, keywords: "subtitles translate", run: v.stopCaptions }
               : { id: "cc", label: "Live captions for what's playing", icon: Captions, keywords: "subtitles translate video call", run: () => v.startCaptions("en") },

@@ -616,3 +616,55 @@ def test_round_two_everyday_fixes(monkeypatch):
     from vyrse import fallback
 
     assert fallback.line_for("vyrse_screen", _json.dumps({"success": True, "saved": "C:/Pics/VYRSE 1.png"})) == "Screenshot saved to C:/Pics/VYRSE 1.png."
+
+
+def test_spelled_out_routines_are_saved_by_vyrse_itself(monkeypatch):
+    from vyrse import router
+
+    assert router.routine_parts("when i say im heading out, save my work and lock my pc") == ("im heading out", "save my work and lock my pc")
+    assert router.routine_parts('When I say "study time", then open Notion and play lofi on Spotify.') == ("study time", "open Notion and play lofi on Spotify")
+    assert router.routine_parts("When I say bedtime then dim the screen and set an alarm for 7") == ("bedtime", "dim the screen and set an alarm for 7")
+    # no clear break, or a question: left to the model
+    assert router.routine_parts("whenever i say movie night dim my screen") is None
+    assert router.routine_parts("when i say hello, what do you say?") is None
+    monkeypatch.setenv("VYRSE_TEST_DRY", "1")
+    out = router.pre_llm_call(platform="vyrse", user_message="when i say im heading out, save my work and lock my pc", session_id="r1")
+    assert "already saved the routine" in out["context"]
+    # its steps must not run in the same turn
+    assert router.pre_tool_call(tool_name="vyrse_controls", args={"action": "lock"}, session_id="r1")["action"] == "block"
+    assert router.transform_llm_output(response_text="ok", session_id="r1", platform="vyrse").startswith("Saved. Say")
+
+
+def test_battery_2026_11_17_hints():
+    from vyrse import router
+    from vyrse.router import hint_for, is_multi, style_switch
+
+    assert "vyrse_quiz" in hint_for("quiz me on the solar system")
+    assert "plain words" in hint_for("what can you do")
+    assert "plain words" in hint_for("yo what can u do")
+    assert hint_for("what can you do about this error") is None or "plain words" in hint_for("what can you do about this error")
+    assert style_switch("back to normal") == "normal"
+    assert style_switch("go back to savage mode") == "savage"
+    assert style_switch("i want to go back to normal life") is None
+    for text in ("open notepad and type hello world", "open spotify, play lofi and then turn the volume down a bit",
+                 "take a screenshot then open paint", "pause the music and lock my pc"):
+        assert is_multi(text), text
+    for text in ("open notepad", "play rock and roll", "how do i open notepad and type in it", "find my resume",
+                 "when i say bye, pause the music and lock my pc", "what is salt and pepper"):
+        assert not is_multi(text), text
+    out = router.pre_llm_call(platform="vyrse", user_message="open notepad and type hello world", session_id="m1")
+    assert "more than one thing" in out["context"]
+
+
+def test_no_walkthrough_after_a_screen_read_unless_asked():
+    from vyrse import router, turn
+
+    router.pre_llm_call(platform="vyrse", user_message="whats on my screen", session_id="g1")
+    turn.set_said("whats on my screen")
+    assert router.pre_tool_call(tool_name="vyrse_screen", args={"target": "screen"}, session_id="g1") is None
+    assert router.pre_tool_call(tool_name="vyrse_point", args={"action": "guide", "goal": "enable dark mode"}, session_id="g1")["action"] == "block"
+    router.pre_llm_call(platform="vyrse", user_message="look at my screen and show me where to click to export", session_id="g1")
+    turn.set_said("look at my screen and show me where to click to export")
+    router.pre_tool_call(tool_name="vyrse_screen", args={"target": "screen"}, session_id="g1")
+    assert router.pre_tool_call(tool_name="vyrse_point", args={"action": "guide", "goal": "export"}, session_id="g1") is None
+

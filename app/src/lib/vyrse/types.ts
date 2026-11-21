@@ -49,6 +49,15 @@ export const QUICK_SHORTCUTS = {
 } as const;
 export type QuickShortcut = keyof typeof QUICK_SHORTCUTS;
 
+/** "What's this?": drag a box over anything on screen and VYRSE explains it. */
+export const EXPLAIN_SHORTCUTS = {
+  "ctrl+alt+e": { label: "Ctrl + Alt + E", accelerator: "Control+Alt+E" },
+  "ctrl+alt+w": { label: "Ctrl + Alt + W", accelerator: "Control+Alt+W" },
+  "f7": { label: "F7", accelerator: "F7" },
+  off: { label: "Off", accelerator: null },
+} as const;
+export type ExplainShortcut = keyof typeof EXPLAIN_SHORTCUTS;
+
 /** Automatic daily briefing: off, the first time VYRSE starts each day, or at a time. */
 export const BRIEFING_TIMES = {
   off: "Off",
@@ -246,6 +255,7 @@ export interface Settings {
   talkShortcut: TalkShortcut;
   dictateShortcut: DictateShortcut;
   quickShortcut: QuickShortcut;
+  explainShortcut: ExplainShortcut;
   /** automatic daily briefing (it's always available by saying "good morning") */
   briefing: BriefingTime;
   /** how VYRSE talks (see talk-styles.ts) */
@@ -291,6 +301,7 @@ export const DEFAULT_SETTINGS: Settings = {
   talkShortcut: "ctrl+shift+space",
   dictateShortcut: "ctrl+alt+d",
   quickShortcut: "alt+space",
+  explainShortcut: "ctrl+alt+e",
   briefing: "off",
   talkStyle: "normal",
   accent: "cyan",

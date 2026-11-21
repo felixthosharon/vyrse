@@ -45,6 +45,20 @@ _PLAY = re.compile(r"^\s*(?:(?:can|could) you |pls |please |yo )?(?:play|put on|
 _SAVINGS = re.compile(r"\b(?:how much|what) (?:money |cash )?(?:have|has|did|do) (?:you|vyrse|u) (?:saved?|save)\b|"
                       r"\bsav(?:ed|ings) (?:me|on|by)\b|\bmy savings\b|\bhow much (?:would|did) (?:it|this|that|chatgpt|claude|the api) (?:have )?cost", re.I)
 
+# 2026-11-17 battery: "quiz me on the solar system" came back with the tool call written out as text (no quiz
+# started); "what can you do" listed raw tool names; "open notepad and type hello world" opened Notepad, said
+# "now let me type" and stopped.
+_QUIZ = re.compile(r"^\s*(?:(?:can|could) you |pls |please |yo |ok(?:ay)? )?(?:quiz|test) me\b", re.I)
+_CAN_DO = re.compile(r"\bwhat (?:all )?(?:can|could) (?:you|u) (?:even |actually )?do\b|\bwhat are you (?:able to do|capable of)\b|"
+                     r"\bwhat (?:are|r) your (?:features|skills|abilities)\b|^\s*help\W*$", re.I)
+_ACT = (r"(?:open|launch|start|type|write|paste|play|pause|turn|set|close|search|google|send|save|lock|take|mute|unmute|"
+        r"remind|show|find|read|copy|switch|dim|put|make|create|tell|check|delete|move|tidy)")
+_MULTI = re.compile(rf"^\s*(?:(?:can|could) you |pls |please |yo )?{_ACT}\b.{{2,120}}?(?:,|\band then\b|\bthen\b|\band\b)\s*(?:also |then )?"
+                    rf"{_ACT}\b", re.I | re.S)
+MULTI_HINT = ("[They asked for more than one thing. Do every part with its own tool call, in order, in this same turn. "
+              "Don't announce a step (\"now let me...\"): make the call. Write your reply only after the last one, "
+              "and say which parts worked.]")
+
 _HOW_TO = re.compile(r"\s*(?:how (?:do|can|to|would|should)|what(?:'s| is) the (?:way|shortcut|key)|which (?:key|shortcut))\b", re.I)
 
 HINTS = (
@@ -70,12 +84,24 @@ HINTS = (
     (_EMAIL, "[An email: write it in a card (vyrse_workspace kind=markdown: To, Subject, the text). Then offer to "
              "open it in their Gmail: vyrse_chrome action=open url=https://mail.google.com/mail/?view=cm&fs=1&su=SUBJECT&body=BODY "
              "(URL-encoded).]"),
+    (_QUIZ, "[A quiz: make a REAL tool call to vyrse_quiz now (action=start, subject=<topic>, text=<one question per "
+            "line as 'question :: answer :: topic'>, 5 questions unless they gave a number). Never write the call out "
+            "as text. After it returns, greet in a line and ask question 1.]"),
+    (_CAN_DO, "[Say what you can do in plain words, 6 short lines at most, no tool names and no code: talk or type to "
+              "you; open apps, type into them and tidy windows; music, volume and brightness; read the screen and explain "
+              "anything on it (Ctrl+Alt+E to box something); find files; reminders, alarms, timers and routines; search "
+              "the web; quizzes, charts and notes on the board; their phone and Echo. End with one thing to try.]"),
     (_REWIND, "[What they were doing: vyrse_system action=rewind (day=yesterday, part=morning|afternoon|evening|night, "
               "at=HH:MM, date=YYYY-MM-DD as they said).]"),
     (_WEB, "[This changes over time: FIRST call web_search with a short query (e.g. 'iPhone 17 price'), then answer "
            "from those results and name the source. web_extract only for a URL that search returned. Not from memory, "
            "not the browser.]"),
 )
+
+
+def is_multi(text: str) -> bool:
+    """Two or more actions in one request ("open notepad and type hello", "play lofi, then turn it down")."""
+    return bool(_MULTI.match(text)) and not _HOW_TO.match(text) and not _ROUTINE.match(text)
 
 
 def hint_for(text: str) -> Optional[str]:
@@ -92,18 +118,21 @@ def hint_for(text: str) -> Optional[str]:
 def pre_llm_call(platform: str = "", user_message: Any = "", session_id: str = "", **_: Any) -> Optional[Dict[str, str]]:
     _done.pop(session_id, None)
     _reply.pop(session_id, None)
+    _screen_read.discard(session_id)
     text = str(user_message or "").strip()
     if platform != "vyrse" or not text or text.startswith("[") or len(text) > 800:
         return None
     now = time.strftime("%A %d %B %Y, %I:%M %p").replace(" 0", " ")
     parts = [f"[Now: {now}, this PC's local time. For the time or date, answer from this; no tool.]"]
-    quick = run_quick(session_id, text) if len(text) < 60 else None
+    quick = run_quick(session_id, text) if len(text) < 60 else _make_routine(session_id, text)
     if quick:
         parts.append(quick["context"])
         return {"context": " ".join(parts)}
     hint = hint_for(text)
     if hint:
         parts.append(hint)
+    if is_multi(text):
+        parts.append(MULTI_HINT)
     return {"context": " ".join(parts)}
 
 
@@ -175,6 +204,9 @@ def run_quick(session_id: str, text: str) -> Optional[Dict[str, str]]:
     style = style_switch(text)
     if style:
         return _switch_style(session_id, style)
+    made = _make_routine(session_id, text)
+    if made:
+        return made
     found = quick_command(text)
     if not found:
         return None
@@ -204,6 +236,53 @@ def run_quick(session_id: str, text: str) -> Optional[Dict[str, str]]:
                        "don't call vyrse_controls again.]"}
 
 
+# "when I say heading out, save my work and lock my PC": VYRSE saves the routine itself when the phrase and the steps
+# are clearly separated (a comma, quotes, "then", a colon). Left to the model it was saved two times out of three
+# (2026-11-14 battery); the third time it only said so, or ran the steps at once.
+_ROUTINE_SPLIT = re.compile(
+    r"^\s*(?:so |ok(?:ay)? |yo )?(?:when(?:ever)?|if|each time|every time) i say\s+"
+    r"(?:[\"“'‘](?P<quoted>[^\"”'’]{3,40})[\"”'’]\s*[,:]?\s*(?:then\s+)?|(?P<plain>[^,:;]{3,40}?)\s*(?:[,:;]\s*(?:then\s+)?|\s+then\s+))"
+    r"(?:(?:i want you to|you should|you|please|pls|just)\s+)*(?P<steps>\S.{8,600})$", re.I | re.S)
+
+
+def routine_parts(text: str) -> Optional[tuple]:
+    """(phrase, steps) when the message spells out a routine with a clear break between the two."""
+    m = _ROUTINE_SPLIT.match(text.strip())
+    if not m:
+        return None
+    name = (m.group("quoted") or m.group("plain") or "").strip()
+    steps = m.group("steps").strip().rstrip(".! ")
+    if "?" in steps[-3:] or "?" in text.strip()[-2:]:  # "when I say hello, what do you say?" is a question
+        return None
+    return (name, steps) if len(name) >= 3 and len(steps) >= 10 else None
+
+
+def _make_routine(session_id: str, text: str) -> Optional[Dict[str, str]]:
+    import json
+    import os
+
+    parts = routine_parts(text)
+    if not parts:
+        return None
+    name, steps = parts
+    if os.environ.get("VYRSE_TEST_DRY") and "vyrse_routine" not in os.environ.get("VYRSE_TEST_ALLOW", "").split(","):
+        saved = name.lower()
+    else:
+        from . import routines
+
+        try:
+            out = json.loads(routines.handle({"action": "create", "name": name, "steps": steps}))
+        except Exception as exc:
+            out = {"ok": False, "error": str(exc)}
+        if not out.get("ok"):
+            return {"context": f"[Saving that routine failed: {out.get('error')}. Say so in a line; don't run the steps.]"}
+        saved = out["saved"]
+    _done[session_id] = {"action": "routine"}
+    _reply[session_id] = f"Saved. Say “{saved}” and I'll {steps[0].lower() + steps[1:]}."
+    return {"context": f"[VYRSE has already saved the routine “{saved}”. Confirm in one line; don't run its steps now and "
+                       "don't call any tool.]"}
+
+
 # "switch to savage mode", "chill mode", "back to normal": the talk style, switched by VYRSE itself. Left to the model
 # it sometimes only said "switching to chill mode" (and stayed as it was), and read "focus mode" as a study session.
 _STYLE_ASK = (
@@ -226,6 +305,11 @@ def style_switch(text: str) -> Optional[str]:
     except Exception:
         pass
     t = text.strip().lower()
+    back = re.match(r"^(?:ok(?:ay)? |and |now )?(?:(?:go|switch|change) )?back to (?:the )?(?P<name>"
+                    + "|".join(re.escape(n) for n in sorted(names, key=len, reverse=True))
+                    + r")(?: (?:mode|style|talk style|vibe))?(?: (?:please|plz|now))?\W*$", t)
+    if back:
+        return names[back.group("name")]
     pattern = _STYLE_ASK.replace("{names}", "|".join(re.escape(n) for n in sorted(names, key=len, reverse=True)))
     m = re.match(pattern, t)
     if not m:
@@ -256,10 +340,27 @@ def _switch_style(session_id: str, style: str) -> Dict[str, str]:
     return {"context": f"[VYRSE has already switched the talk style to {label}. Reply in a few words; no tool needed.]"}
 
 
+# 2026-11-14 battery: after "what's on my screen?" the model once started guide rings nobody asked for (text it read
+# on the screen steered it). A walkthrough after a screen read needs the user to have asked how or where.
+_GUIDE_ASKED = re.compile(r"\b(?:how (?:do|can|to|would|should)|where (?:do|is|are|can|should)|show me|guide|walk me|point|"
+                          r"highlight|help me|teach me|which button|what do i (?:click|press)|do it for me|step by step)\b", re.I)
+_screen_read: set = set()
+
+
 def pre_tool_call(tool_name: str = "", args: Optional[Dict[str, Any]] = None, session_id: str = "", **_: Any) -> Optional[Dict[str, Any]]:
+    if tool_name == "vyrse_screen":
+        _screen_read.add(session_id)
+    elif tool_name == "vyrse_point" and session_id in _screen_read and isinstance(args, dict) and args.get("action", "guide") == "guide":
+        from . import turn
+
+        if not _GUIDE_ASKED.search(turn.said()):
+            return {"action": "block", "message": '{"ok": false, "note": "They asked what is on the screen, not how to do '
+                                                  'something. Answer from what you read; no walkthrough."}'}
     done = _done.get(session_id)
     if done and done.get("action") == "style":  # nothing else was asked for: no timers, no second switch
         return {"action": "block", "message": '{"ok": true, "note": "The talk style is already switched; nothing more to do."}'}
+    if done and done.get("action") == "routine":  # it was only being set up: its steps must not run now
+        return {"action": "block", "message": '{"ok": true, "note": "The routine is saved. Nothing to run now; just confirm."}'}
     if tool_name == "vyrse_controls" and done and isinstance(args, dict) and args.get("action") == done["action"]:
         return {"action": "block", "message": '{"ok": true, "note": "Already done by VYRSE this turn; don\'t repeat it."}'}
     return None

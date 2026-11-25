@@ -107,6 +107,7 @@ export function createHermesVyrseApi(bridge: VyrseBridge): VyrseApi & { gateway:
       restart: () => gateway.restartBackend(),
       setup: () => gateway.setupBackend(),
       ...(gateway.canInstallBackend ? { install: () => gateway.installBackend() } : {}),
+      ...(gateway.canOpenSecurity ? { openSecurity: () => gateway.openSecurity() } : {}),
     },
     conversations: {
       list: () => sessions.list(),

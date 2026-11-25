@@ -1,6 +1,7 @@
-import { BrowserWindow, ipcMain } from 'electron'
+import { BrowserWindow, ipcMain, shell } from 'electron'
 
 import { IPC_CHANNELS, type BackendStatus } from '../shared/backend-types'
+import { SECURITY_PAGE } from './app-control'
 import type { HermesBackend } from './hermes-backend'
 import { trusted } from './guard'
 
@@ -12,6 +13,7 @@ export function registerBackendIpc(backend: HermesBackend): void {
   ipcMain.handle(IPC_CHANNELS.restart, event => (trusted(event) ? backend.restart() : undefined))
   ipcMain.handle(IPC_CHANNELS.setup, event => (trusted(event) ? backend.setup() : undefined))
   ipcMain.handle(IPC_CHANNELS.installHermes, event => (trusted(event) ? backend.installHermes() : undefined))
+  ipcMain.handle(IPC_CHANNELS.openSecurity, event => (trusted(event) ? shell.openExternal(SECURITY_PAGE) : undefined))
 
   backend.on('status', (status: BackendStatus) => {
     // The renderer never sees log tails unless the backend actually failed.

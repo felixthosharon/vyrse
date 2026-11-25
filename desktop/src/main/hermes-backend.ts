@@ -5,6 +5,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 
 import type { BackendConnection, BackendStatus } from '../shared/backend-types'
+import { explainFailure, smartAppControl, warnBeforeInstall, type SmartAppControl } from './app-control'
 import { LogTail, parseReadyPort, RestartPolicy } from './backend-policy'
 import { hermesCommand, locateHermes, type HermesInstall } from './hermes-locator'
 import { installHermes, runSetup, setupState, type SetupSource } from './setup'
@@ -37,6 +38,8 @@ export class HermesBackend extends EventEmitter<HermesBackendEvents> {
   private status: BackendStatus = { phase: 'stopped', message: 'Not started' }
   private readonly policy = new RestartPolicy()
   private readonly logTail = new LogTail()
+  /** what the running install or setup printed, to tell why it failed */
+  private attemptLog: string[] = []
   private stopping = false
   private restartTimer: NodeJS.Timeout | null = null
   private install: HermesInstall | null = null
@@ -46,6 +49,7 @@ export class HermesBackend extends EventEmitter<HermesBackendEvents> {
     private readonly setupSource: SetupSource | null = null,
     /** developer checks only: a local script to run in place of Hermes' installer */
     private readonly installerOverride?: string,
+    private readonly readAppControl: () => Promise<SmartAppControl> = smartAppControl,
   ) {
     super()
   }
@@ -72,6 +76,7 @@ export class HermesBackend extends EventEmitter<HermesBackendEvents> {
         phase: 'not-installed',
         message: 'Hermes Agent is not installed',
         detail: 'Hermes Agent is the free AI engine VYRSE runs on. VYRSE can install it for you (about 10 minutes, a few GB).',
+        ...warnBeforeInstall(await this.readAppControl()),
       })
       return
     }
@@ -99,6 +104,7 @@ export class HermesBackend extends EventEmitter<HermesBackendEvents> {
     if (this.status.phase !== 'not-installed') return
     const message = 'Installing Hermes Agent'
     this.setStatus({ phase: 'setting-up', message, detail: 'Getting the installer' })
+    this.attemptLog = []
     const ok = await installHermes(line => {
       this.log(`[install] ${line}`)
       this.setStatus({ phase: 'setting-up', message, detail: line.trim() })
@@ -110,6 +116,7 @@ export class HermesBackend extends EventEmitter<HermesBackendEvents> {
         message: "Hermes Agent didn't install",
         detail: 'Check the details below and try again, or install it yourself from https://hermes-agent.nousresearch.com and restart VYRSE.',
         logTail: this.logTail.last(),
+        ...explainFailure(await this.readAppControl(), this.attemptLog),
       })
       return
     }
@@ -129,11 +136,13 @@ export class HermesBackend extends EventEmitter<HermesBackendEvents> {
       message: "Setup didn't finish",
       detail: 'Check the details below, then try again.',
       logTail: this.logTail.last(),
+      ...explainFailure(await this.readAppControl(), this.attemptLog),
     })
   }
 
   private async applySetup(message: string): Promise<boolean> {
     this.setStatus({ phase: 'setting-up', message })
+    this.attemptLog = []
     return runSetup(this.setupSource!, this.install!.hermesHome, line => {
       this.log(`[setup] ${line}`)
       this.setStatus({ phase: 'setting-up', message, detail: line.trim() })
@@ -261,12 +270,7 @@ export class HermesBackend extends EventEmitter<HermesBackendEvents> {
 
     const wait = this.policy.nextDelay()
     if (wait === null) {
-      this.setStatus({
-        phase: 'failed',
-        message: 'Hermes keeps stopping',
-        detail: 'Hermes crashed repeatedly. Check the log below, then press Retry.',
-        logTail: this.logTail.last(),
-      })
+      void this.gaveUp()
       return
     }
     this.setStatus({
@@ -281,6 +285,18 @@ export class HermesBackend extends EventEmitter<HermesBackendEvents> {
     }, wait)
   }
 
+  private async gaveUp(): Promise<void> {
+    const why = explainFailure(await this.readAppControl(), this.logTail.last(80))
+    if (this.stopping || this.child) return // restarted by the user meanwhile
+    this.setStatus({
+      phase: 'failed',
+      message: 'Hermes keeps stopping',
+      detail: 'Hermes crashed repeatedly. Check the log below, then press Retry.',
+      logTail: this.logTail.last(),
+      ...why,
+    })
+  }
+
   private setStatus(status: BackendStatus): void {
     this.status = status
     this.emit('status', status)
@@ -288,6 +304,8 @@ export class HermesBackend extends EventEmitter<HermesBackendEvents> {
 
   private log(text: string): void {
     this.logTail.push(text)
+    this.attemptLog.push(text)
+    if (this.attemptLog.length > 2000) this.attemptLog.shift()
     if (this.logFile) {
       try {
         fs.appendFileSync(this.logFile, text.endsWith('\n') ? text : `${text}\n`)

@@ -49,6 +49,11 @@ your conversations, memory and voice never leave your machine unless you connect
    GB, into `%LOCALAPPDATA%\hermes`), then sets itself up in it: the VYRSE plugin, the voice libraries, the
    Kokoro voice model (about 350 MB), the wake word and VYRSE's skills. Already have Hermes? VYRSE only offers
    **Set up**. After an update, VYRSE repeats its own setup by itself.
+   **Smart App Control:** if Windows' Smart App Control is on, it blocks Hermes' Python files (they are not
+   signed) and has no exception for single apps. VYRSE tells you before installing. To use VYRSE you would turn it
+   off in *Windows Security → App & browser control → Smart App Control settings*. That lowers protection for all
+   apps (Microsoft Defender keeps running). Update Windows first: on older Windows 11 versions it can only be
+   turned back on by reinstalling Windows. On a school or work PC, ask its administrator.
 3. **Get an AI model** in *Settings → AI models*, any of these:
    - **Download one.** Pick "Small and fast", "Balanced" or "Smarter" (or search by name); VYRSE shows the size
      that suits your GPU and downloads it, with pause and resume.

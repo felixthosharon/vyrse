@@ -426,14 +426,30 @@ def _controls():
     return _load("vyrse_plugin_controls", "controls/__init__.py")
 
 
+def _media_state():
+    return _load("vyrse_plugin_media_state", "media_state.py")
+
+
+_PLAYING_KEYS = ("playing", "title", "artist", "album", "app", "position", "length")
+
+
 def _now_playing(result: Dict[str, Any]) -> Dict[str, Any]:
-    return {k: result.get(k) for k in ("playing", "title", "artist", "album", "app")} | {"playing": bool(result.get("playing"))}
+    out = {k: result.get(k) for k in _PLAYING_KEYS} | {"playing": bool(result.get("playing"))}
+    state = _media_state().note(out)
+    return out | {"owned": bool(state.get("owned")), "version": int(state.get("version") or 0)}
 
 
 @router.get("/media")
 async def media_now() -> Dict[str, Any]:
-    """What the PC is playing (for the now-playing pill)."""
+    """What the PC is playing, and whether VYRSE started it (the pill shows only that)."""
     return _now_playing(await asyncio.to_thread(_controls().run, {"action": "now_playing"}))
+
+
+@router.get("/media/state")
+async def media_state() -> Dict[str, Any]:
+    """Cheap (a file read): the apps ask every few seconds and re-read what's playing only when `version` moved."""
+    state = _media_state().load()
+    return {"owned": bool(state.get("owned")), "version": int(state.get("version") or 0)}
 
 
 @router.post("/media")
@@ -441,7 +457,17 @@ async def media_send(body: Dict[str, Any] = Body(...)) -> Dict[str, Any]:
     command = str(body.get("command") or "")
     if command not in ("play_pause", "next", "previous"):
         raise HTTPException(status_code=400, detail="command must be play_pause, next or previous")
-    return _now_playing(await asyncio.to_thread(_controls().run, {"action": "media", "command": command}))
+    result = await asyncio.to_thread(_controls().run, {"action": "media", "command": command})
+    if result.get("ok") and result.get("title"):
+        _media_state().claim(result)
+    return _now_playing(result)
+
+
+@router.post("/media/hide")
+async def media_hide() -> Dict[str, Any]:
+    """The pill was closed on one device: it goes away on all of them (the music keeps playing)."""
+    state = _media_state().release("hidden")
+    return {"owned": False, "version": int(state.get("version") or 0)}
 
 
 @router.get("/memory")

@@ -470,15 +470,19 @@
 
 /* the three little bars of the now-playing pill */
 @keyframes vyr-eq {
-  0%, 100% { height: 3px; }
-  50% { height: 13px; }
+  0%, 100% { height: 0.25em; }
+  50% { height: 1.1em; }
 }
 .now-playing-bar {
-  height: 3px;
+  height: 0.25em;
   animation: vyr-eq 1.05s ease-in-out infinite;
 }
+/* readable over the orb's glow: a little more body than the usual glass */
+.now-playing-pill {
+  background-color: color-mix(in oklab, var(--background) 72%, transparent);
+}
 @media (prefers-reduced-motion: reduce) {
-  .now-playing-bar { animation: none; height: 9px; }
+  .now-playing-bar { animation: none; height: 0.7em; }
 }
 
 @keyframes vyr-settle {

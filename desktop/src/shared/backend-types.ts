@@ -19,6 +19,8 @@ export interface BackendStatus {
   detail?: string
   attempt?: number
   logTail?: string[]
+  /** Windows (Smart App Control) blocks what Hermes needs: offer its settings page */
+  blocked?: boolean
 }
 
 export interface BackendConnection {
@@ -37,6 +39,7 @@ export const IPC_CHANNELS = {
   restart: 'vyrse:backend:restart',
   setup: 'vyrse:backend:setup',
   installHermes: 'vyrse:backend:install-hermes',
+  openSecurity: 'vyrse:backend:open-security',
   status: 'vyrse:backend:status',
   presence: 'vyrse:presence',
   orbState: 'vyrse:orb-state',
@@ -171,6 +174,8 @@ export interface VyrseBridge {
     setup(): Promise<void>
     /** install Hermes Agent (its own installer), then set VYRSE up in it and start */
     installHermes(): Promise<void>
+    /** open Windows Security at App & browser control */
+    openSecurity(): Promise<void>
     onStatus(callback: (status: BackendStatus) => void): () => void
   }
   desktop: {

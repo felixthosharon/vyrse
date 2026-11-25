@@ -40,14 +40,70 @@ if (-not $registered -and -not (Test-Path $exe) -and -not (Get-AppxPackage -Name
   Fail 'Spotify is not installed on this PC.'
 }
 $before = Now-Playing
-Start-Process ('spotify:search:' + [Uri]::EscapeDataString($query))
 
 $A = [System.Windows.Automation.AutomationElement]
 $Scope = [System.Windows.Automation.TreeScope]
 $isButton = New-Object System.Windows.Automation.PropertyCondition($A::ControlTypeProperty, [System.Windows.Automation.ControlType]::Button)
-$words = @($query.ToLower() -split '\W+' | Where-Object { $_.Length -gt 1 })
-
+$isGroup = New-Object System.Windows.Automation.PropertyCondition($A::ControlTypeProperty, [System.Windows.Automation.ControlType]::Group)
 function Norm([string]$s) { (($s.ToLower() -replace '[^\p{L}\p{N}]+', ' ').Trim()) }
+
+function Report($pressed, $started) {
+  $now = $null
+  for ($i = 0; $i -lt 14; $i++) {
+    Start-Sleep -Milliseconds 500
+    try { $now = Now-Playing } catch { $now = $null }
+    if ($now -and $now.status -eq 'Playing' -and $now.title -and (-not $before -or $now.title -ne $before.title -or $i -ge 6)) { break }
+  }
+  if ($now -and $now.status -eq 'Playing') {
+    Out-Json @{ ok = $true; playing = $true; pressed = $pressed; started = $started; title = $now.title; artist = $now.artist; app = 'Spotify' }
+  }
+  Out-Json @{ ok = $false; pressed = $pressed; error = "Pressed '$pressed' in Spotify, but nothing started playing. Say so; don't claim it's playing." }
+}
+
+# The user's own library (2026-11-24: "play my liked songs" started a stranger's playlist from search). Spotify's
+# sidebar lists it as buttons "<name> Playlist • <owner>" (Liked Songs too); a name that matches opens that playlist
+# and its page's "Play <name>" button starts it. Anything else goes to search as before.
+$mine = $query -match '^(?:my |our )|\splay ?list$' -or $query -match '\b(?:liked|saved|favou?rite) (?:songs|tracks|music)\b|^(?:my )?likes$'
+$wantList = Norm (($query -replace '^(?:my|our)\s+', '') -replace '\s+play ?list$', '')
+if ($query -match '\b(?:liked|saved|favou?rite) (?:songs|tracks|music)\b|^(?:my )?likes$') { $wantList = 'liked songs' }
+if ($mine -and $wantList) {
+  $deadline = (Get-Date).AddSeconds(15)
+  $h = Spotify-Window
+  if ($h -eq [IntPtr]::Zero) { Start-Process 'spotify:'; while ((Get-Date) -lt $deadline -and ($h = Spotify-Window) -eq [IntPtr]::Zero) { Start-Sleep -Milliseconds 600 } }
+  if ($h -ne [IntPtr]::Zero) {
+    $win = $A::FromHandle($h)
+    $entry = $null; $name = $null
+    foreach ($b in @($win.FindAll($Scope::Descendants, $isButton))) {
+      if ($b.Current.Name -match '^(.+?) (?:Pinned )?Playlist\W') {
+        if ((Norm $Matches[1]) -eq $wantList) { $entry = $b; $name = $Matches[1]; break }
+      }
+    }
+    if ($entry) {
+      $p = $null
+      if ($entry.TryGetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern, [ref]$p)) { $p.Invoke() }
+      while ((Get-Date) -lt $deadline) {
+        Start-Sleep -Milliseconds 600
+        foreach ($g in @($win.FindAll($Scope::Descendants, $isGroup))) {
+          # 'Spotify – Liked Songs', '<name> | Spotify Playlist' (Spotify's), '<name> - playlist by <owner> | Spotify' (theirs)
+          $gn = $g.Current.Name
+          if ($gn -notmatch ('^Spotify . ' + [regex]::Escape($name) + '$') -and $gn -notmatch ('^' + [regex]::Escape($name) + '(?: - playlist by .+)? \| Spotify')) { continue }
+          $play = $g.FindFirst($Scope::Descendants, (New-Object System.Windows.Automation.PropertyCondition($A::NameProperty, "Play $name")))
+          $q = $null
+          if ($play -and $play.TryGetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern, [ref]$q)) {
+            try { $loaded = Now-Playing; if ($loaded -and $loaded.title) { $before = $loaded } } catch { }
+            $q.Invoke()
+            Report "Play $name" "Playlist $name"
+          }
+        }
+      }
+      Fail "Opened '$name' in Spotify, but couldn't press its Play button. Say so; don't claim it's playing."
+    }
+  }
+}
+
+Start-Process ('spotify:search:' + [Uri]::EscapeDataString($query))
+
+$words = @($query.ToLower() -split '\W+' | Where-Object { $_.Length -gt 1 })
 
 # The search page is a group named "Search for <words> | Spotify" (the search field itself isn't visible to UI
 # Automation). Each result holds a "Play <title>" button, the title, the artist and a label with its type
@@ -78,6 +134,20 @@ function Pick-Result($page) {
   $exact = @($results | Where-Object { $_.t -eq $wantTitle -and (-not $wantArtist -or $_.artist.Contains($wantArtist)) })
   if (-not $exact.Count) { $exact = @($results | Where-Object { "$($_.t) $($_.artist)" -eq $want }) }
   if ($exact.Count) {
+    # Covers share the title (2026-11-24: "Blinding Lights" started a cover by Loi, the first card). Unless they named
+    # the artist, prefer the artist who shows up most across all the results for this title: the original has its
+    # single, remixes, live and instrumental versions there; a cover has one or two.
+    if (-not $wantArtist) {
+      $count = @{}
+      foreach ($r in $results) { if ($r.t.Contains($wantTitle) -and $r.artist) { $a = ($r.artist -replace '^explicit ', ''); $count[$a] = 1 + [int]$count[$a] } }
+      $rank = { param($r) $best = 0; foreach ($k in $count.Keys) { if ($r.artist -and ($r.artist.Contains($k) -or $k.Contains($r.artist))) { $best = [Math]::Max($best, $count[$k]) } }; $best }
+      $songs = @($exact | Where-Object kind -eq 'Song')
+      if ($songs.Count -gt 1) {
+        $top = $songs[0]; $topScore = & $rank $songs[0]
+        foreach ($sg in $songs) { $sc = & $rank $sg; if ($sc -gt $topScore) { $top = $sg; $topScore = $sc } }
+        return $top
+      }
+    }
     foreach ($k in 'Song', 'Artist', 'Playlist', 'Album', 'Single', 'EP') { $hit = $exact | Where-Object kind -eq $k | Select-Object -First 1; if ($hit) { return $hit } }
     return $exact[0]
   }

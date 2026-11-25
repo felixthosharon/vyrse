@@ -15,6 +15,7 @@ export interface LinkState {
   message: string;
   detail?: string;
   logTail?: string[];
+  blocked?: boolean;
   hermesVersion?: string;
 }
 
@@ -143,6 +144,14 @@ export class HermesGateway {
     return this.bridge.backend.installHermes?.() ?? Promise.resolve();
   }
 
+  get canOpenSecurity(): boolean {
+    return Boolean(this.bridge.backend.openSecurity);
+  }
+
+  openSecurity(): Promise<void> {
+    return this.bridge.backend.openSecurity?.() ?? Promise.resolve();
+  }
+
   setupBackend(): Promise<void> {
     return this.bridge.backend.setup?.() ?? this.bridge.backend.restart();
   }
@@ -173,7 +182,7 @@ export class HermesGateway {
             : status.phase === "stopped" || status.phase === "stopping"
               ? "offline"
               : "starting";
-    this.setLink({ phase, message: status.message, detail: status.detail, logTail: status.logTail });
+    this.setLink({ phase, message: status.message, detail: status.detail, logTail: status.logTail, blocked: status.blocked });
   }
 
   private async dial(): Promise<void> {

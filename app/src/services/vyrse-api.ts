@@ -276,12 +276,20 @@ export interface NowPlayingInfo {
   album?: string;
   /** Windows' id of the app that is playing */
   app?: string;
+  /** VYRSE started or controlled this music (the pill shows only that) */
+  owned?: boolean;
+  /** moves whenever VYRSE's music changes, on any device */
+  version?: number;
 }
 export type MediaCommand = "play_pause" | "next" | "previous";
 export interface MediaApi {
   now(): Promise<NowPlayingInfo>;
+  /** cheap: whether VYRSE has music on, and a version that moves when it changes (asked every few seconds) */
+  state(): Promise<{ owned: boolean; version: number }>;
   /** presses the media key and returns what is playing afterwards */
   send(command: MediaCommand): Promise<NowPlayingInfo>;
+  /** closes the pill on every device (the music keeps playing) */
+  hide(): Promise<unknown>;
 }
 
 /** How much VYRSE was used, what it cost, and what the local model saved. Money is in US dollars. */
@@ -404,6 +412,8 @@ export interface LinkStatus {
   message: string;
   detail?: string;
   logTail?: string[];
+  /** Windows (Smart App Control) blocks what Hermes needs */
+  blocked?: boolean;
   hermesVersion?: string;
 }
 
@@ -431,6 +441,7 @@ export interface VyrseApi {
     setup?(): Promise<void>;
     /** Hermes isn't installed: install it, then set up and start (desktop) */
     install?(): Promise<void>;
+    openSecurity?(): Promise<void>;
   };
 
   conversations?: {

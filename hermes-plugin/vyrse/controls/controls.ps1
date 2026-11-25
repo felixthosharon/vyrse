@@ -88,7 +88,16 @@ function Now-Playing {
   if ($null -eq $s) { return @{ ok = $true; playing = $false; note = 'Nothing is playing.' } }
   $p = Await ($s.TryGetMediaPropertiesAsync()) ([Windows.Media.Control.GlobalSystemMediaTransportControlsSessionMediaProperties])
   $status = $s.GetPlaybackInfo().PlaybackStatus.ToString()
-  @{ ok = $true; playing = ($status -eq 'Playing'); status = $status; title = $p.Title; artist = $p.Artist; album = $p.AlbumTitle; app = $s.SourceAppUserModelId }
+  # Where the song is (seconds). Windows reports the position as of its last update; while playing, add the time since.
+  $pos = $null; $len = $null
+  try {
+    $t = $s.GetTimelineProperties()
+    $len = [Math]::Round($t.EndTime.TotalSeconds, 1)
+    $pos = $t.Position.TotalSeconds
+    if ($status -eq 'Playing') { $pos += ([DateTimeOffset]::Now - $t.LastUpdatedTime).TotalSeconds }
+    $pos = [Math]::Round([Math]::Max(0, [Math]::Min($len, $pos)), 1)
+  } catch { }
+  @{ ok = $true; playing = ($status -eq 'Playing'); status = $status; title = $p.Title; artist = $p.Artist; album = $p.AlbumTitle; app = $s.SourceAppUserModelId; position = $pos; length = $len }
 }
 
 switch ($req.action) {

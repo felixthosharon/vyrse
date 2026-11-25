@@ -303,8 +303,14 @@ export class HermesMedia implements MediaApi {
   now(): Promise<NowPlayingInfo> {
     return this.gateway.rest<NowPlayingInfo>("/api/plugins/vyrse/media");
   }
+  state(): Promise<{ owned: boolean; version: number }> {
+    return this.gateway.rest<{ owned: boolean; version: number }>("/api/plugins/vyrse/media/state");
+  }
   send(command: MediaCommand): Promise<NowPlayingInfo> {
     return this.gateway.rest<NowPlayingInfo>("/api/plugins/vyrse/media", { method: "POST", body: json({ command }) });
+  }
+  hide(): Promise<unknown> {
+    return this.gateway.rest("/api/plugins/vyrse/media/hide", { method: "POST", body: "{}" });
   }
 }
 

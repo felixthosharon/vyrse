@@ -23,6 +23,8 @@ export interface BackendStatus {
   detail?: string;
   attempt?: number;
   logTail?: string[];
+  /** Windows (Smart App Control) blocks what Hermes needs */
+  blocked?: boolean;
 }
 
 export interface BackendConnection {
@@ -41,6 +43,8 @@ export interface VyrseBridge {
     setup?(): Promise<void>;
     /** install Hermes Agent, then set VYRSE up in it (desktop only; older shells lack it) */
     installHermes?(): Promise<void>;
+    /** open Windows Security (desktop only; older shells lack it) */
+    openSecurity?(): Promise<void>;
     onStatus(callback: (status: BackendStatus) => void): () => void;
   };
   /** present in the desktop app (older shells may lack it) */

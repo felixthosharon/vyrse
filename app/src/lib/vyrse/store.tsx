@@ -55,6 +55,8 @@ interface VyrseContextValue {
   setupBackend: () => void;
   /** install Hermes Agent from inside VYRSE; absent where that isn't possible (phone, older desktop shell) */
   installBackend?: () => void;
+  /** open Windows Security; absent where that isn't possible */
+  openSecurity?: () => void;
 
   /** Hermes-owned agent settings; null until Hermes is connected */
   agent: AgentSettings | null;
@@ -1570,6 +1572,7 @@ export function VyrseProvider({ children }: { children: ReactNode }) {
     restartBackend: useCallback(() => void api.link?.restart(), [api]),
     setupBackend: useCallback(() => void (api.link?.setup ?? api.link?.restart)?.(), [api]),
     installBackend: api.link?.install ? () => void api.link?.install?.() : undefined,
+    openSecurity: api.link?.openSecurity ? () => void api.link?.openSecurity?.() : undefined,
     agent: state.agent,
     setModel,
     refreshAgent: loadAgent,

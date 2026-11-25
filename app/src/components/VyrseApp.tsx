@@ -232,9 +232,7 @@ export function VyrseApp() {
       >
         {/* Presence cell — the presence grows to the largest circle that fits */}
         <section className="relative flex min-h-0 min-w-0 flex-col items-center justify-center">
-          <div className="pointer-events-none absolute inset-x-0 top-0 z-10 flex justify-center">
-            <NowPlaying />
-          </div>
+          <NowPlaying />
           <div ref={stage.ref} className="flex min-h-0 w-full flex-1 items-center justify-center">
             {/* Size is written directly by the observer above; the cell itself
                 animates, so the presence follows the layout frame-perfectly. */}

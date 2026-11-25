@@ -68,7 +68,7 @@ HINTS = (
     (_TIDY, "[Tidy the open windows: vyrse_desktop action=tidy (lays them out side by side in one go; closes nothing). "
             "Not the file organizer: only sort files if they said files, icons or folders.]"),
     (_PLAY, "[If this is music: vyrse_controls action=play query=<the song, artist, playlist or mood> (searches Spotify "
-            "and starts it). Not action=media: that only toggles what's loaded. Say what it reports is playing. "
+            "and starts it; for their own Liked Songs or playlists keep 'my': query='my liked songs', 'my gym playlist'). Not action=media: that only toggles what's loaded. Say what it reports is playing. "
             "If it's a game or an app, open it instead.]"),
     (_SAVINGS, "[Money saved: vyrse_system action=savings (days=30 default, 7 for this week, 365 for all time). Give "
                "the dollar figure it returns.]"),

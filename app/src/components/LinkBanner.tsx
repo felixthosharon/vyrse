@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { AlertTriangle, Download, Loader2, RotateCw } from "lucide-react";
+import { AlertTriangle, Download, Loader2, RotateCw, ShieldAlert } from "lucide-react";
 import { useVyrse } from "@/lib/vyrse/store";
 import { cn } from "@/lib/utils";
 
@@ -8,7 +8,7 @@ import { cn } from "@/lib/utils";
  * crashed or not installed — and offers the one action that helps. Hidden when online.
  */
 export function LinkBanner() {
-  const { link, restartBackend, setupBackend, installBackend, booted } = useVyrse();
+  const { link, restartBackend, setupBackend, installBackend, openSecurity, booted } = useVyrse();
   const [showLog, setShowLog] = useState(false);
   if (!booted || link.phase === "online") return null;
 
@@ -20,18 +20,28 @@ export function LinkBanner() {
 
   return (
     <div className="pointer-events-auto mx-auto mb-2 w-full max-w-[min(44rem,90vw)] rounded-xl border border-border-strong bg-surface/80 px-4 py-2.5 backdrop-blur">
-      <div className="flex items-center gap-3">
+      <div className={cn("flex items-center gap-3", link.blocked && "flex-wrap justify-end")}>
         {transient ? (
           <Loader2 className="size-4 shrink-0 animate-spin text-primary" strokeWidth={1.8} />
         ) : (
           <AlertTriangle className="size-4 shrink-0 text-destructive" strokeWidth={1.8} />
         )}
-        <div className="min-w-0 flex-1">
+        <div className={cn("min-w-0 flex-1", link.blocked && "basis-[80%]")}>
           <p className="text-[12.5px] text-foreground">
 {link.message}
           </p>
           {link.detail && <p className={cn("pt-0.5 text-[11px] text-muted-foreground", link.phase === "setting-up" && "truncate")}>{link.detail}</p>}
         </div>
+        {link.blocked && openSecurity && (
+          <button
+            type="button"
+            onClick={openSecurity}
+            className="flex shrink-0 items-center gap-1.5 rounded-full bg-primary px-3.5 py-1.5 text-[11.5px] text-primary-foreground"
+          >
+            <ShieldAlert className="size-3.5" strokeWidth={1.8} />
+            Open Windows Security
+          </button>
+        )}
         {needsSetup && (
           <button
             type="button"
@@ -47,10 +57,13 @@ export function LinkBanner() {
             type="button"
             data-install-hermes
             onClick={installBackend}
-            className="flex shrink-0 items-center gap-1.5 rounded-full bg-primary px-3.5 py-1.5 text-[11.5px] text-primary-foreground"
+            className={cn(
+              "flex shrink-0 items-center gap-1.5 rounded-full px-3.5 py-1.5 text-[11.5px]",
+              link.blocked ? "border border-border-strong text-foreground" : "bg-primary text-primary-foreground",
+            )}
           >
             <Download className="size-3.5" strokeWidth={1.8} />
-            Install it for me
+            {link.blocked ? "Try installing" : "Install it for me"}
           </button>
         )}
         {failed && (

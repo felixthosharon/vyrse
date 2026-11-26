@@ -19,7 +19,9 @@ SCHEMA: Dict[str, Any] = {
     "name": "vyrse_system",
     "description": (
         "Accurate stats about this PC. Use it instead of terminal commands for CPU, memory, GPU, disks, network "
-        "and running processes. action=overview (everything at a glance); action=processes (top apps by memory "
+        "and running processes. action=specs (the hardware: CPU model, cores, RAM, graphics cards, Windows version, "
+        "drives; for 'what are my specs', 'what GPU do I have', 'how much RAM'; never answer those from memory); "
+        "action=overview (live usage at a glance); action=processes (top apps by memory "
         "or cpu); action=disks; action=storage (what's eating disk space: the biggest folders, measured; `path` "
         "to look inside one, e.g. 'C:\\Users\\you\\AppData\\Local'); action=sample (metric cpu|memory|gpu|network measured every `interval` seconds "
         "for `seconds`, e.g. 'graph my CPU for 10 s'); action=watch (a LIVE chart of metric in the workspace that "
@@ -40,7 +42,7 @@ SCHEMA: Dict[str, Any] = {
     "parameters": {
         "type": "object",
         "properties": {
-            "action": {"type": "string", "enum": ["overview", "processes", "disks", "storage", "sample", "watch", "stop_watch", "usage", "games", "rewind", "recap", "doctor", "savings"]},
+            "action": {"type": "string", "enum": ["specs", "overview", "processes", "disks", "storage", "sample", "watch", "stop_watch", "usage", "games", "rewind", "recap", "doctor", "savings"]},
             "days": {"type": "number", "description": "For savings: how far back, 1-365. Default 30 (7 = this week)."},
             "hours": {"type": "number", "description": "For rewind: how far back from now (default 3), or with day=yesterday the whole day."},
             "day": {"type": "string", "enum": ["today", "yesterday"], "description": "For rewind: a whole day instead of the last hours."},
@@ -94,6 +96,108 @@ def _gpu() -> Optional[Dict[str, Any]]:
                 "vram_total_gb": round(float(total) / 1024, 1), "temperature_c": float(temp)}
     except Exception:
         return None
+
+
+_specs_cache: Dict[str, Any] = {}
+
+
+def _run_hidden(args: List[str], timeout: float = 8) -> str:
+    try:
+        from hermes_cli._subprocess_compat import windows_hide_flags
+        flags = windows_hide_flags()
+    except Exception:
+        flags = 0x08000000 if hasattr(subprocess, "STARTUPINFO") else 0
+    try:
+        return subprocess.run(args, capture_output=True, text=True, timeout=timeout, creationflags=flags).stdout.strip()
+    except Exception:
+        return ""
+
+
+def _cpu_name() -> str:
+    try:
+        import winreg
+
+        with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"HARDWARE\DESCRIPTION\System\CentralProcessor\0") as k:
+            return " ".join(str(winreg.QueryValueEx(k, "ProcessorNameString")[0]).split())
+    except Exception:
+        import platform
+
+        return platform.processor() or "unknown"
+
+
+def _windows() -> str:
+    try:
+        import winreg
+
+        with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Microsoft\Windows NT\CurrentVersion") as k:
+            def get(name: str) -> str:
+                try:
+                    return str(winreg.QueryValueEx(k, name)[0])
+                except OSError:
+                    return ""
+            build = int(get("CurrentBuildNumber") or 0)
+            # Windows 11 still says "Windows 10" in ProductName; the build number tells them apart.
+            name = get("ProductName").replace("Windows 10", "Windows 11") if build >= 22000 else get("ProductName")
+            return " ".join(x for x in (name, get("DisplayVersion"), f"(build {build})" if build else "") if x)
+    except Exception:
+        import platform
+
+        return platform.platform()
+
+
+def _graphics() -> List[Dict[str, Any]]:
+    """Every graphics card: NVIDIA cards with their exact memory (nvidia-smi), the rest (AMD, Intel, built-in)
+    from Windows."""
+    cards: List[Dict[str, Any]] = []
+    for line in _run_hidden(["nvidia-smi", "--query-gpu=name,memory.total,driver_version", "--format=csv,noheader,nounits"]).splitlines():
+        try:
+            name, mem, driver = [x.strip() for x in line.split(",")]
+            cards.append({"name": name, "memory_gb": round(float(mem) / 1024, 1), "driver": driver})
+        except ValueError:
+            continue
+    ps = ("Get-CimInstance Win32_VideoController | ForEach-Object { $_.Name + '|' + $_.AdapterRAM + '|' + $_.DriverVersion }")
+    for line in _run_hidden(["powershell", "-NoProfile", "-NonInteractive", "-Command", ps]).splitlines():
+        name, _, rest = line.partition("|")
+        name = name.strip()
+        if not name or any(c["name"].lower() in name.lower() or name.lower() in c["name"].lower() for c in cards):
+            continue
+        ram, _, driver = rest.partition("|")
+        card: Dict[str, Any] = {"name": name}
+        try:
+            # AdapterRAM is a 32-bit field: it can't show more than 4 GB, so only report it below that
+            if 0 < int(ram) < 4 * 1024 ** 3:
+                card["memory_gb"] = round(int(ram) / 1024 ** 3, 1)
+        except ValueError:
+            pass
+        if driver.strip():
+            card["driver"] = driver.strip()
+        cards.append(card)
+    return cards
+
+
+def specs() -> Dict[str, Any]:
+    """This PC's hardware, read from the machine (cached: it doesn't change while VYRSE runs)."""
+    if not _specs_cache:
+        import psutil
+
+        mem = psutil.virtual_memory()
+        battery = psutil.sensors_battery() if hasattr(psutil, "sensors_battery") else None
+        _specs_cache.update(
+            cpu=_cpu_name(), cpu_cores=psutil.cpu_count(logical=False), cpu_threads=psutil.cpu_count(),
+            ram_gb=round(mem.total / 1024 ** 3), graphics=_graphics(), windows=_windows(),
+            drives=[{"drive": d["drive"], "size_gb": d["total_gb"]} for d in _disks()],
+            laptop=battery is not None,
+        )
+    return dict(_specs_cache)
+
+
+def specs_line() -> str:
+    """The specs in one plain sentence, for the model's context."""
+    s = specs()
+    gpus = "; ".join(c["name"] + (f" ({c['memory_gb']} GB)" if c.get("memory_gb") else "") for c in s["graphics"]) or "none found"
+    drives = ", ".join(f"{d['drive']} {round(d['size_gb'])} GB" for d in s["drives"])
+    return (f"CPU {s['cpu']} ({s['cpu_cores']} cores, {s['cpu_threads']} threads); RAM {s['ram_gb']} GB; "
+            f"graphics: {gpus}; {s['windows']}; drives: {drives}; {'a laptop' if s['laptop'] else 'a desktop'}")
 
 
 def _disks() -> List[Dict[str, Any]]:
@@ -394,15 +498,25 @@ def handle(params: Dict[str, Any], **_: Any) -> str:
 
     action = params.get("action")
     # In VYRSE the answer to "how's my PC" / "what's eating my storage" is a picture: draw it unless told not to.
-    show = params.get("show") is not False if action in ("overview", "storage", "processes", "usage", "savings") else bool(params.get("show"))
+    show = params.get("show") is not False if action in ("specs", "overview", "storage", "processes", "usage", "savings") else bool(params.get("show"))
     result: Dict[str, Any] = {"success": True}
     try:
-        if action == "overview":
+        if action == "specs":
+            result["specs"] = specs()
+            if show:
+                s = result["specs"]
+                rows = [["Processor", f"{s['cpu']} ({s['cpu_cores']} cores, {s['cpu_threads']} threads)"],
+                        ["Memory", f"{s['ram_gb']} GB"]]
+                rows += [["Graphics", c["name"] + (f" ({c['memory_gb']} GB)" if c.get("memory_gb") else "")] for c in s["graphics"]]
+                rows += [["Windows", s["windows"]]]
+                rows += [["Drive " + d["drive"], f"{round(d['size_gb'])} GB"] for d in s["drives"]]
+                result["workspace"] = _show({"kind": "table", "id": "pc-specs", "title": "Your PC", "columns": ["Part", "What it is"], "rows": rows})
+        elif action == "overview":
             psutil.cpu_percent(None)
             time.sleep(0.5)
             mem = psutil.virtual_memory()
             result.update(
-                cpu_percent=psutil.cpu_percent(None), cpu_cores=psutil.cpu_count(),
+                cpu=_cpu_name(), cpu_percent=psutil.cpu_percent(None), cpu_cores=psutil.cpu_count(),
                 memory={"used_gb": _gb(mem.used), "total_gb": _gb(mem.total), "percent": mem.percent},
                 gpu=_gpu(), disks=_disks(),
                 uptime_hours=round((time.time() - psutil.boot_time()) / 3600, 1),

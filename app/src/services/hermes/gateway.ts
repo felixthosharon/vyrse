@@ -152,6 +152,14 @@ export class HermesGateway {
     return this.bridge.backend.openSecurity?.() ?? Promise.resolve();
   }
 
+  get canOpenModelsFolder(): boolean {
+    return Boolean(this.bridge.backend.openModelsFolder);
+  }
+
+  openModelsFolder(): Promise<string> {
+    return this.bridge.backend.openModelsFolder?.() ?? Promise.resolve("");
+  }
+
   setupBackend(): Promise<void> {
     return this.bridge.backend.setup?.() ?? this.bridge.backend.restart();
   }

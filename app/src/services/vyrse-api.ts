@@ -227,6 +227,8 @@ export interface LocalModelsApi {
   resume(jobId: string): Promise<void>;
   use(modelId: string): Promise<string>;
   remove(modelId: string): Promise<void>;
+  /** open the folder people paste .gguf files into (desktop app); '' or what went wrong */
+  openFolder?(): Promise<string>;
 }
 
 /** An outside service VYRSE can use (Notion, Linear, Todoist…), through Hermes' MCP connectors. */

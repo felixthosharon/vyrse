@@ -2,6 +2,7 @@ import { useEffect, useRef } from "react";
 import { createPresence, type PresenceHandle, type PresenceParams } from "@/lib/vyrse/presence-engine";
 import { useVyrse } from "@/lib/vyrse/store";
 import { IS_PHONE } from "@/services/phone";
+import { onFrame, setMaxFps } from "@/lib/vyrse/frame-pace";
 
 const INTENSITY = { subtle: 0.72, balanced: 1, expressive: 1.35 } as const;
 const REACTIVITY = { low: 0.5, medium: 1, high: 1.6 } as const;
@@ -45,6 +46,19 @@ export function VyrsePresence({ className }: { className?: string }) {
   const themeRef = useRef(resolvedTheme);
   themeRef.current = resolvedTheme;
 
+  // Whether VYRSE's window has focus (the orb draws fewer frames when it doesn't).
+  const focusedRef = useRef(typeof document === "undefined" || document.hasFocus());
+  useEffect(() => {
+    const onFocus = () => (focusedRef.current = true);
+    const onBlur = () => (focusedRef.current = false);
+    window.addEventListener("focus", onFocus);
+    window.addEventListener("blur", onBlur);
+    return () => {
+      window.removeEventListener("focus", onFocus);
+      window.removeEventListener("blur", onBlur);
+    };
+  }, []);
+
   // Pointer proximity — the presence leans very slightly toward the user.
   useEffect(() => {
     if (IS_PHONE) return; // touch has no hover to lean toward, and measuring on every move costs a layout
@@ -64,7 +78,7 @@ export function VyrsePresence({ className }: { className?: string }) {
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
-    let raf = 0;
+    let stopSync: (() => void) | null = null;
     let cancelled = false;
     let handle: PresenceHandle | null = null;
     let ro: ResizeObserver | null = null;
@@ -109,6 +123,8 @@ export function VyrsePresence({ className }: { className?: string }) {
         theme: themeRef.current,
         attention: 0,
         lite: IS_PHONE,
+        // Desktop: drawn by the graphics card (WebGL2), same picture, a fraction of the CPU. The phone keeps the 2D canvas.
+        gpu: !IS_PHONE,
       });
       handleRef.current = handle;
       canvas.style.opacity = "1";
@@ -117,7 +133,6 @@ export function VyrsePresence({ className }: { className?: string }) {
       const start = performance.now();
       let coveredSince: number | null = null;
       const sync = () => {
-        raf = requestAnimationFrame(sync);
         const s = settingsRef.current;
         const p = handle!.params;
         const elapsed = (performance.now() - start) / 1600;
@@ -149,9 +164,14 @@ export function VyrsePresence({ className }: { className?: string }) {
               ? 0.55
               : 1;
         if (IS_PHONE && document.visibilityState === "hidden") p.paused = true;
+        // Development builds only (vite build --mode development): performance checks switch the orb off with window.__orbOff = true.
+        if (import.meta.env.MODE === "development" && (window as unknown as { __orbOff?: boolean }).__orbOff) p.paused = true;
+        // Full smoothness while you're using VYRSE; half the frames while another app has focus.
+        p.maxFps = IS_PHONE || focusedRef.current ? 60 : 30;
+        setMaxFps(p.maxFps); // the page's own paced clock (background animations); the phone's orb worker has its own
         post?.(p);
       };
-      raf = requestAnimationFrame(sync);
+      stopSync = onFrame(sync);
 
       // Layout size is reported straight to the renderer. This never touches
       // React state and only reallocates the render buffer on bucket changes,
@@ -168,7 +188,7 @@ export function VyrsePresence({ className }: { className?: string }) {
     return () => {
       cancelled = true;
       cancelAnimationFrame(id);
-      cancelAnimationFrame(raf);
+      stopSync?.();
       ro?.disconnect();
       handle?.destroy();
       handleRef.current = null;

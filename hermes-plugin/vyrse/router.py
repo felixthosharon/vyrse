@@ -59,6 +59,32 @@ MULTI_HINT = ("[They asked for more than one thing. Do every part with its own t
               "Don't announce a step (\"now let me...\"): make the call. Write your reply only after the last one, "
               "and say which parts worked.]")
 
+# 2026-11-27: on a friend's PC (Gemma 3 4B) "what are my specs" got made-up hardware, and the workspace's
+# "How's my PC doing?" came back as text. Spec questions now carry the real hardware, read from the machine.
+_SPECS = re.compile(
+    r"\b(?:specs?|specifications?|spec sheet|hardware|config(?:uration)?)\b(?!.{0,20}\b(?:of|for) (?:the|an?|that) (?!pc|computer|laptop))"
+    r"|\bwhat(?:'s| is| kind of| type of)? (?:my |this |the )?(?:cpu|processor|gpu|graphics card|video card|ram|memory|vram|motherboard|windows version|os)\b"
+    r"|\bwhich (?:cpu|processor|gpu|graphics card|windows)\b|\bhow much (?:ram|memory|vram|storage|disk space)\b"
+    r"|\b(?:my|this) (?:pc|computer|laptop|machine|rig)(?:'s)? (?:specs?|parts|hardware)\b|\bwhat (?:pc|computer|laptop) (?:do|have) i\b", re.I)
+_PC_STATUS = re.compile(
+    r"\bhow(?:'s| is| are) (?:my |the |this )?(?:pc|computer|laptop|system|machine|rig)\b(?: doing| running| holding up)?"
+    r"|\b(?:system|pc|computer) (?:stats|status|health|performance|usage)\b|\b(?:cpu|ram|gpu|memory) (?:usage|load|temp(?:erature)?)\b", re.I)
+
+
+def specs_context() -> Optional[str]:
+    try:
+        from .system import specs_line
+        return (f"[This PC's real hardware, read from the machine just now: {specs_line()}. Answer from these facts "
+                "only: never guess, round up or add parts that aren't listed. To show it as a card: vyrse_system "
+                "action=specs.]")
+    except Exception:
+        return "[Hardware: call vyrse_system action=specs and answer only from what it returns. Never guess specs.]"
+
+
+PC_STATUS_HINT = ("[Live PC stats: make a REAL tool call to vyrse_system action=overview now (it puts the gauges in the "
+                  "workspace itself, so don't call vyrse_workspace for them). Never write the call out as text and never "
+                  "make up numbers. Then say in a sentence or two what stands out.]")
+
 _HOW_TO = re.compile(r"\s*(?:how (?:do|can|to|would|should)|what(?:'s| is) the (?:way|shortcut|key)|which (?:key|shortcut))\b", re.I)
 
 HINTS = (
@@ -131,6 +157,10 @@ def pre_llm_call(platform: str = "", user_message: Any = "", session_id: str = "
     hint = hint_for(text)
     if hint:
         parts.append(hint)
+    elif _PC_STATUS.search(text):
+        parts.append(PC_STATUS_HINT)
+    if _SPECS.search(text) and not _HOW_TO.match(text):
+        parts.append(specs_context() or "")
     if is_multi(text):
         parts.append(MULTI_HINT)
     return {"context": " ".join(parts)}

@@ -125,6 +125,9 @@ def start() -> None:
         while True:
             try:
                 pending_refresh = sync_once(sizes) or pending_refresh
+                # Every model whose own chat template can't call tools gets VYRSE's (model_fit.py).
+                from . import model_fit
+                pending_refresh = model_fit.ensure() or pending_refresh
                 if pending_refresh and _runtime_idle():
                     from hermes_cli.local_runtime import bootstrap
                     bootstrap.refresh_local_runtime()

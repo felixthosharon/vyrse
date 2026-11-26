@@ -241,7 +241,14 @@ foreach ($skill in Get-ChildItem (Join-Path $Repo 'hermes-plugin\skills') -Direc
 Write-Host "VYRSE personality"
 $soul = Join-Path $HermesHome 'SOUL.md'
 $isVyrse = (Test-Path $soul) -and ((Get-Content $soul -Raw -ErrorAction SilentlyContinue) -match 'You are VYRSE')
-if ($isVyrse) { Ok "SOUL.md" }
+# 2026-11-27: "created by Felix" made small models call every user Felix. Reword that one sentence in place.
+$oldMaker = 'companion, created by Felix.'
+if ($isVyrse -and -not $Check -and ((Get-Content $soul -Raw) -match [regex]::Escape($oldMaker))) {
+  $text = (Get-Content $soul -Raw).Replace($oldMaker, "companion. Felix made VYRSE; he is the developer, not the user, so never call the user Felix unless they say that is their name.")
+  [IO.File]::WriteAllText($soul, $text, (New-Object Text.UTF8Encoding($false)))
+  Did "SOUL.md: Felix is named as the developer, not the user"
+}
+elseif ($isVyrse) { Ok "SOUL.md" }
 elseif ($Check) { Todo "SOUL.md is not VYRSE's preset yet" }
 else {
   if (Test-Path $soul) { Copy-Item $soul "$soul.before-vyrse.bak" -Force }

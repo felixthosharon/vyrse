@@ -120,7 +120,11 @@ function toJob(j: JobRow): ModelJob {
 }
 
 export class HermesLocalModels implements LocalModelsApi {
-  constructor(private readonly gateway: HermesGateway) {}
+  constructor(private readonly gateway: HermesGateway) {
+    if (gateway.canOpenModelsFolder) this.openFolder = () => gateway.openModelsFolder();
+  }
+
+  openFolder?: () => Promise<string>;
 
   async status(): Promise<LocalModelsStatus> {
     const [s, h, jobs] = await Promise.all([

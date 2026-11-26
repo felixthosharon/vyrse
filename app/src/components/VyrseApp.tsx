@@ -13,6 +13,7 @@ import { LinkBanner } from "./LinkBanner";
 import { ClarifyCard } from "./ClarifyCard";
 import { Toast } from "./Toast";
 import { Onboarding } from "./Onboarding";
+import { ModelGate } from "./ModelGate";
 import { VyrsePresence } from "./presence/VyrsePresence";
 import { VoiceControl } from "./presence/VoiceControl";
 import { Conversation } from "./conversation/Conversation";
@@ -22,6 +23,7 @@ import { NowPlaying } from "./NowPlaying";
 import { useVyrse } from "@/lib/vyrse/store";
 import { cn } from "@/lib/utils";
 import { IS_PHONE } from "@/services/phone";
+import { paceEndlessAnimations } from "@/lib/vyrse/frame-pace";
 
 const EASE = "cubic-bezier(0.16,0.84,0.24,1)";
 const SIDE_MS = 700;
@@ -109,6 +111,10 @@ export function VyrseApp() {
       off?.();
     };
   }, []);
+
+  // Endless CSS animations (background drift, light sweep, caret...) step on the orb's paced clock instead of
+  // making the window show a frame on every screen refresh. See frame-pace.ts.
+  useEffect(() => paceEndlessAnimations(), []);
 
   const stage = useLargestFit<HTMLDivElement, HTMLDivElement>();
 
@@ -353,6 +359,7 @@ export function VyrseApp() {
       <CommandPalette />
       <RecordingPill />
       <Onboarding />
+      <ModelGate />
     </div>
   );
 }

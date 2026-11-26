@@ -40,6 +40,7 @@ export const IPC_CHANNELS = {
   setup: 'vyrse:backend:setup',
   installHermes: 'vyrse:backend:install-hermes',
   openSecurity: 'vyrse:backend:open-security',
+  openModelsFolder: 'vyrse:backend:open-models-folder',
   status: 'vyrse:backend:status',
   presence: 'vyrse:presence',
   orbState: 'vyrse:orb-state',
@@ -176,6 +177,8 @@ export interface VyrseBridge {
     installHermes(): Promise<void>
     /** open Windows Security at App & browser control */
     openSecurity(): Promise<void>
+    /** open the folder people paste .gguf models into; resolves '' or what went wrong */
+    openModelsFolder(): Promise<string>
     onStatus(callback: (status: BackendStatus) => void): () => void
   }
   desktop: {

@@ -1,6 +1,8 @@
 import { useState } from "react";
 import { ArrowRight, Mic, Sparkles } from "lucide-react";
 import { useVyrse } from "@/lib/vyrse/store";
+import { getVyrseApi } from "@/services";
+import { needsModel } from "./ModelGate";
 
 /** Opens Settings on a given page (SettingsPanel listens). */
 export function openSettingsPage(page: string) {
@@ -23,10 +25,12 @@ export function startPersonalSetup(v: { startNew: () => void; send: (text: strin
  * Shown once, when Hermes has no name saved yet.
  */
 export function Onboarding() {
-  const { prefsLoaded, settings, setSettings, setSettingsOpen, startNew, send } = useVyrse();
+  const { prefsLoaded, settings, setSettings, setSettingsOpen, startNew, send, agent } = useVyrse();
   const [name, setName] = useState("");
   const [step, setStep] = useState<"name" | "voice" | "setup" | "done">("name");
   if (!prefsLoaded || step === "done" || (settings.userName && step === "name")) return null;
+  // No model yet: the first-run model screen (ModelGate) comes first; the setup chat couldn't send without one.
+  if (needsModel(agent, Boolean(getVyrseApi().localModels))) return null;
 
   const saveName = () => {
     const clean = name.replace(/\s+/g, " ").trim().slice(0, 40);

@@ -37,6 +37,7 @@ import { configureUiSounds, playUiSound, preloadUiSounds, startAlarm, stopAlarm 
 import { makeMessage, newId } from "./mock-ai";
 import { loadSettings, saveSettings } from "./settings/storage";
 import { MEDIA_CHANGED, TURN_DONE } from "./media-events";
+import { onFrame } from "./frame-pace";
 
 /** What VYRSE is asked about a part of the screen the user boxed with the "What's this?" shortcut. */
 export const EXPLAIN_PROMPT = "What's this? Explain it in a few sentences.";
@@ -859,17 +860,16 @@ export function VyrseProvider({ children }: { children: ReactNode }) {
   }, [state.presence, turnActive, reminderLabel, runningTool, dictation]);
 
   // Presence level: voice controller (Hermes mode) or the browser analyser (demo mode).
-  useEffect(() => {
-    let raf = 0;
-    const tick = () => {
-      raf = requestAnimationFrame(tick);
-      const voice = voiceRef.current;
-      const src = sourceRef.current;
-      levelRef.current = voice ? voice.level() : src ? src.getLevel() * (0.4 + s.micSensitivity) : 0;
-    };
-    raf = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(raf);
-  }, [s.micSensitivity]);
+  // On the shared paced clock (frame-pace.ts), like the orb that reads it.
+  useEffect(
+    () =>
+      onFrame(() => {
+        const voice = voiceRef.current;
+        const src = sourceRef.current;
+        levelRef.current = voice ? voice.level() : src ? src.getLevel() * (0.4 + s.micSensitivity) : 0;
+      }),
+    [s.micSensitivity],
+  );
 
   useEffect(
     () => () => {

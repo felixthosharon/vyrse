@@ -1,5 +1,6 @@
 import { planResponse, tokenize } from "@/lib/vyrse/mock-ai";
 import type { StreamEvent, TurnRequest, VyrseApi } from "./vyrse-api";
+import { firstRunDemo } from "./mock-first-run";
 
 /** Cancellable delay that rejects nothing — it simply resolves early on abort. */
 function wait(ms: number, signal: AbortSignal) {
@@ -20,7 +21,10 @@ function wait(ms: number, signal: AbortSignal) {
  * chunk by chunk — nothing here delays a pre-completed string wholesale.
  */
 export function createMockVyrseApi(): VyrseApi {
+  // `?firstrun` in the address: a PC with no AI model yet (the first-run model screen), for checking that screen.
+  const firstRun = typeof location !== "undefined" && new URLSearchParams(location.search).has("firstrun") ? firstRunDemo() : {};
   return {
+    ...firstRun,
     id: "mock",
     live: false,
     async *stream(req: TurnRequest, signal: AbortSignal): AsyncGenerator<StreamEvent> {

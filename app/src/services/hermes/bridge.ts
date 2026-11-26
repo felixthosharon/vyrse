@@ -45,6 +45,8 @@ export interface VyrseBridge {
     installHermes?(): Promise<void>;
     /** open Windows Security (desktop only; older shells lack it) */
     openSecurity?(): Promise<void>;
+    /** open the models folder in Explorer; '' or what went wrong (desktop only; older shells lack it) */
+    openModelsFolder?(): Promise<string>;
     onStatus(callback: (status: BackendStatus) => void): () => void;
   };
   /** present in the desktop app (older shells may lack it) */

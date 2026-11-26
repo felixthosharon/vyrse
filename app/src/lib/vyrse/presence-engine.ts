@@ -1,4 +1,14 @@
 import type { PresenceState } from "./types";
+import { onFrame, setMaxFps } from "./frame-pace";
+import {
+  create2dPainter,
+  createGlPainter,
+  glPainterWorks,
+  type Blend,
+  type Painter,
+  type RGB,
+  type Stops,
+} from "./presence-paint";
 
 /**
  * VYRSE presence renderer — orbital core.
@@ -44,14 +54,18 @@ export interface PresenceParams {
   theme: "dark" | "light";
   /** 0..1 pointer proximity */
   attention: number;
-  /** phone: lower buffer resolution, less geometry, at most ~60 frames a second */
+  /** phone: lower buffer resolution, less geometry */
   lite?: boolean;
+  /** most frames drawn a second (unset: 60). Screens refresh at up to 240 Hz; the orb doesn't need that. */
+  maxFps?: number;
   /** skip drawing (the presence is covered, e.g. by a full-screen panel, or the app is in the background) */
   paused?: boolean;
   /** device pixel ratio, when the engine runs in a worker (no window there) */
   dpr?: number;
   /** the accent colour's light for the orb: [main, second] (unset = VYRSE's cyan) */
   tint?: [RGB, RGB];
+  /** draw with the graphics card (WebGL2) when it can; the 2D canvas otherwise. Fixed when the orb is created. */
+  gpu?: boolean;
 }
 
 export interface PresenceHandle {
@@ -62,9 +76,9 @@ export interface PresenceHandle {
   /** Back-compat alias — re-measures from the DOM. */
   resize: () => void;
   destroy: () => void;
+  /** which painter draws the orb */
+  painter?: "2d" | "webgl";
 }
-
-type RGB = [number, number, number];
 
 interface Palette {
   primary: RGB;
@@ -83,7 +97,7 @@ interface Palette {
   /** global stroke alpha multiplier */
   alpha: number;
   /** 'lighter' on dark, 'source-over' on light */
-  blend: GlobalCompositeOperation;
+  blend: Blend;
   coreAlpha: number;
   /** extra circular atmosphere behind the field (0 = none) */
   atmosphere: number;
@@ -102,7 +116,11 @@ let tintCache: { key: string; pal: Palette } | null = null;
 function tinted(theme: "dark" | "light", tint?: [RGB, RGB]): Palette {
   if (!tint) return PALETTES[theme];
   const key = `${theme}:${tint[0].join(",")}:${tint[1].join(",")}`;
-  if (tintCache?.key !== key) tintCache = { key, pal: { ...PALETTES[theme], primary: tint[0], vivid: tint[0], secondary: tint[1] } };
+  if (tintCache?.key !== key)
+    tintCache = {
+      key,
+      pal: { ...PALETTES[theme], primary: tint[0], vivid: tint[0], secondary: tint[1] },
+    };
   return tintCache.pal;
 }
 
@@ -155,7 +173,6 @@ const PALETTES: Record<"dark" | "light", Palette> = {
 };
 
 const clamp01 = (v: number) => (v < 0 ? 0 : v > 1 ? 1 : v);
-const rgba = (c: RGB, a: number) => `rgba(${c[0]},${c[1]},${c[2]},${clamp01(a)})`;
 const mix = (a: RGB, b: RGB, t: number): RGB => [
   a[0] + (b[0] - a[0]) * t,
   a[1] + (b[1] - a[1]) * t,
@@ -203,6 +220,56 @@ function noise2(x: number, y: number) {
   const x2 = lerp(grad(ab, xf, yf - 1), grad(bb, xf - 1, yf - 1), u);
   return lerp(x1, x2, v);
 }
+
+/* -------------------------------------------------------- glow gradients */
+// alpha stops (position, alpha) of the radial glows, from the centre side out
+const ATM_STOPS: Stops = [
+  [0, 0.3],
+  [0.45, 0.2],
+  [0.75, 0.08],
+  [1, 0],
+];
+const GLOW_STOPS: Stops = [
+  [0, 0.2],
+  [0.3, 0.16],
+  [0.55, 0.1],
+  [0.8, 0.04],
+  [1, 0],
+];
+const COMET_STOPS: Stops = [
+  [0, 0.9],
+  [0.35, 0.25],
+  [1, 0],
+];
+const HALO_STOPS: Stops = [
+  [0, 0.45],
+  [0.3, 0.12],
+  [1, 0],
+];
+const BODY_STOPS: Stops = [
+  [0, 0.12],
+  [0.55, 0.26],
+  [0.9, 0.55],
+  [1, 0],
+];
+const NUCLEUS_STOPS: Stops = [
+  [0, 0.5],
+  [0.35, 0.22],
+  [0.7, 0.06],
+  [1, 0],
+];
+const ATMO_STOPS: Stops = [
+  [0, 0],
+  [0.8, 0],
+  [0.86, 0.32],
+  [0.9, 0.14],
+  [1, 0],
+];
+const SPEC_STOPS: Stops = [
+  [0, 0.5],
+  [0.5, 0.16],
+  [1, 0],
+];
 
 /* ------------------------------------------------------------- structures */
 
@@ -443,11 +510,19 @@ function profileFor(state: PresenceState): Profile {
 
 /* ----------------------------------------------------------------- engine */
 
+/** the frame clock: the shared paced loop, or a test's own */
+export type FrameClock = (frame: (now: number) => void) => () => void;
+
 /** Draws on a page canvas, or on an OffscreenCanvas inside a worker (the phone app renders it off the UI thread). */
-export function createPresence(canvas: HTMLCanvasElement | OffscreenCanvas, initial: PresenceParams): PresenceHandle {
+export function createPresence(
+  canvas: HTMLCanvasElement | OffscreenCanvas,
+  initial: PresenceParams,
+  clock: FrameClock = onFrame,
+): PresenceHandle {
   const params: PresenceParams = { ...initial };
-  // The two 2D contexts share the drawing API used here.
-  const ctx = canvas.getContext("2d", { alpha: true }) as CanvasRenderingContext2D | null;
+  // The graphics card when it can (desktop), else the 2D canvas: the same picture either way (presence-paint.ts).
+  const ctx: Painter | null =
+    (initial.gpu && glPainterWorks() && createGlPainter(canvas)) || create2dPainter(canvas);
   const { orbits, dust, surface, land } = build(initial.lite ? 9 : 11);
   const SURFACE_N = land.length;
   /** per-frame scratch for the surface pass: projected x, y, radius and alpha bucket per dot */
@@ -468,9 +543,9 @@ export function createPresence(canvas: HTMLCanvasElement | OffscreenCanvas, init
   const dotted = (i: number) => i % 4 === 1;
   const hasComet = (i: number) => i % 3 === 0;
   /** optional cost meter: set window.__presenceProfile = true to collect ms/frame */
-  const meter = (globalThis as unknown as { __presenceProfile?: boolean; __presenceCost?: number[] });
+  const meter = globalThis as unknown as { __presenceProfile?: boolean; __presenceCost?: number[] };
 
-  let raf = 0;
+  let stopFrames: (() => void) | null = null;
   let w = 0;
   let h = 0;
   let cx = 0;
@@ -518,29 +593,11 @@ export function createPresence(canvas: HTMLCanvasElement | OffscreenCanvas, init
   const applyBucket = (next: number) => {
     if (next === bucket) return;
     bucket = next;
-    canvas.width = bucket;
-    canvas.height = bucket;
+    ctx?.resize(bucket);
     w = bucket / dpr;
     h = w;
     cx = w / 2;
     cy = h / 2;
-    radialCache.clear();
-  };
-
-  /* -------------------------------------------------------- gradient cache */
-  const radialCache = new Map<string, CanvasGradient>();
-  const qc = (c: RGB) => `${Math.round(c[0] / 8)},${Math.round(c[1] / 8)},${Math.round(c[2] / 8)}`;
-
-  /** Unit-space radial gradient (centre 0,0 radius 1), scaled by the transform. */
-  const unitRadial = (kind: string, c: RGB, stops: [number, number][], inner = 0) => {
-    const key = `${kind}|${qc(c)}`;
-    let g = radialCache.get(key);
-    if (!g) {
-      g = ctx!.createRadialGradient(0, 0, inner, 0, 0, 1);
-      for (const [at, a] of stops) g.addColorStop(at, rgba(c, a));
-      radialCache.set(key, g);
-    }
-    return g;
   };
 
   const setSize = (cssW: number, cssH: number) => {
@@ -626,10 +683,10 @@ export function createPresence(canvas: HTMLCanvasElement | OffscreenCanvas, init
   };
 
   const frame = (now: number) => {
-    raf = requestAnimationFrame(frame);
     if (destroyed || !ctx) return;
-    // Phones often refresh at 90-120 Hz; the presence doesn't need more than ~60 there.
-    if (params.lite && now - last < 15) return;
+    // Frames come from the shared paced clock (frame-pace.ts): at most maxFps a second, whatever the screen's
+    // refresh rate (2026-11-26: on a 179 Hz monitor the orb was redrawn 179 times a second).
+    if (params.maxFps) setMaxFps(params.maxFps);
     const dtRaw = (now - last) / 1000;
     last = now;
     if (hidden || params.paused) return;
@@ -680,9 +737,6 @@ export function createPresence(canvas: HTMLCanvasElement | OffscreenCanvas, init
     const intensity = params.intensity * params.contrast;
     const detail = Math.max(0.3, Math.min(1, params.detail) * (params.lite ? 0.6 : 1));
 
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    ctx.clearRect(0, 0, w, h);
-
     // The field never touches the element edge — glow stays inside.
     const R = Math.min(w, h) * 0.45;
     // Size is identity: only a breath and a whisper of audio ever touch it.
@@ -698,8 +752,7 @@ export function createPresence(canvas: HTMLCanvasElement | OffscreenCanvas, init
     const good = verdant > 0.02 ? mix(hot, pal.verdant, verdant * 0.6) : hot;
     const field = alert > 0.02 ? mix(good, pal.alert, alert * 0.8) : good;
 
-    const prevBlend = ctx.globalCompositeOperation;
-    ctx.globalCompositeOperation = pal.blend;
+    ctx.begin(dpr, pal.blend);
 
     const A = boot * intensity * pal.alpha;
     const steps = Math.max(48, Math.round(MAX_STEPS * (0.55 + detail * 0.45)) & ~1);
@@ -710,44 +763,20 @@ export function createPresence(canvas: HTMLCanvasElement | OffscreenCanvas, init
     if (pal.atmosphere > 0) {
       // stays inside the canvas: a glow cut off by the canvas edge shows as a faint rectangle on light
       const atmR = R * (0.98 + drive * 0.06);
-      ctx.save();
-      ctx.translate(cx, cy);
-      ctx.scale(atmR, atmR);
-      ctx.fillStyle = unitRadial("atm", field, [
-        [0, 0.3],
-        [0.45, 0.2],
-        [0.75, 0.08],
-        [1, 0],
-      ]);
-      ctx.globalAlpha = clamp01(pal.atmosphere * ga * (0.8 + drive * 0.4));
-      ctx.beginPath();
-      ctx.arc(0, 0, 1, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.restore();
+      ctx.radial(
+        "atm",
+        field,
+        ATM_STOPS,
+        0,
+        cx,
+        cy,
+        atmR,
+        clamp01(pal.atmosphere * ga * (0.8 + drive * 0.4)),
+      );
     }
 
     const glowR = R * (0.86 + drive * 0.2);
-    ctx.save();
-    ctx.translate(cx, cy);
-    ctx.scale(glowR, glowR);
-    ctx.fillStyle = unitRadial(
-      "glow",
-      field,
-      [
-        [0, 0.2],
-        [0.3, 0.16],
-        [0.55, 0.1],
-        [0.8, 0.04],
-        [1, 0],
-      ],
-      0.02,
-    );
-    ctx.globalAlpha = clamp01(ga * (1 + drive * 0.3));
-    ctx.beginPath();
-    ctx.arc(0, 0, 1, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.restore();
-    ctx.globalAlpha = 1;
+    ctx.radial("glow", field, GLOW_STOPS, 0.02, cx, cy, glowR, clamp01(ga * (1 + drive * 0.3)));
 
     /* -------------------------------------------------- orbital geometry */
     // Compute projected geometry once per orbit, then paint it in two depth
@@ -764,8 +793,7 @@ export function createPresence(canvas: HTMLCanvasElement | OffscreenCanvas, init
         o.incSweep * Math.sin(orbT * o.incRate + o.incPhase) +
         // controlled irregularity: a small second harmonic, never noise
         o.nod * 0.5 * Math.sin(orbT * o.nodRate * 1.7 + i) * (0.6 + turb * 0.5);
-      const node =
-        o.node + orbT * o.nodeRate + o.nod * Math.sin(orbT * o.nodRate + i * 1.7) * turb;
+      const node = o.node + orbT * o.nodeRate + o.nod * Math.sin(orbT * o.nodRate + i * 1.7) * turb;
       const tilt = o.tiltZ + orbT * o.tiltRate + Math.sin(orbT * 0.11 + i) * 0.06;
       basis(inc, node, tilt);
       const rr = R * o.r * scale * (1 + drive * 0.012 * (0.35 + o.r));
@@ -793,16 +821,20 @@ export function createPresence(canvas: HTMLCanvasElement | OffscreenCanvas, init
     }
 
     const paintOrbits = (front: boolean) => {
-      ctx.lineCap = "round";
       for (let i = 0; i < orbits.length; i++) {
         const o = orbits[i]!;
         const buf = o.buf;
         const tone = mix(
           field,
-          o.tone > 0.72 ? (params.theme === "light" ? pal.secondary : pal.highlight) : o.tone > 0.42 ? pal.warm : pal.primary,
+          o.tone > 0.72
+            ? params.theme === "light"
+              ? pal.secondary
+              : pal.highlight
+            : o.tone > 0.42
+              ? pal.warm
+              : pal.primary,
           0.35 + o.tone * 0.5,
         );
-        const stroke = rgba(tone, 1);
         const baseA =
           A * o.opacity * (1.0 + energy * 0.7) * (1 + drive * 0.45) * (0.8 + attention * 0.15);
         const isDotted = dotted(i);
@@ -810,12 +842,11 @@ export function createPresence(canvas: HTMLCanvasElement | OffscreenCanvas, init
         // the core line, and a thin specular line offset toward the key light (upper left).
         const tube = !isDotted && detail > 0.45;
         const glows = tube && pal.blend === "lighter";
-        const shine = rgba(mix(tone, pal.spec, 0.7), 1);
-        if (isDotted) {
-          // data ring: fine evenly spaced dashes; the offset makes them flow along the ring
-          ctx.setLineDash([0.9 * pal.weight, 5 * pal.weight]);
-          ctx.lineDashOffset = -orbT * 9 * Math.sign(o.rate);
-        }
+        const shine = mix(tone, pal.spec, 0.7);
+        // data ring: fine evenly spaced dashes; the offset makes them flow along the ring
+        const dash = isDotted
+          ? { on: 0.9 * pal.weight, off: 5 * pal.weight, offset: -orbT * 9 * Math.sign(o.rate) }
+          : null;
         for (let c0 = 0; c0 < steps; c0 += CHUNK) {
           const c1 = Math.min(steps, c0 + CHUNK);
           const zm = (buf[c0 * 3 + 2]! + buf[c1 * 3 + 2]!) * 0.5;
@@ -826,36 +857,41 @@ export function createPresence(canvas: HTMLCanvasElement | OffscreenCanvas, init
           ctx.beginPath();
           ctx.moveTo(buf[c0 * 3]!, buf[c0 * 3 + 1]!);
           for (let s = c0 + 1; s <= c1; s++) ctx.lineTo(buf[s * 3]!, buf[s * 3 + 1]!);
-          ctx.strokeStyle = stroke;
-          if (glows) {
-            ctx.globalAlpha = clamp01(baseA * depth * (front ? 0.11 : 0.06));
-            ctx.lineWidth = o.weight * pal.weight * depth * 3.6;
-            ctx.stroke();
-          }
-          ctx.globalAlpha = clamp01(baseA * depth * (front ? 1.15 : 0.85) * (isDotted ? 1.1 : 1));
-          ctx.lineWidth = o.weight * pal.weight * depth * (1 + drive * 0.3) * (isDotted ? 0.9 : 1);
-          ctx.stroke();
+          if (glows)
+            ctx.stroke(
+              tone,
+              clamp01(baseA * depth * (front ? 0.11 : 0.06)),
+              o.weight * pal.weight * depth * 3.6,
+            );
+          ctx.stroke(
+            tone,
+            clamp01(baseA * depth * (front ? 1.15 : 0.85) * (isDotted ? 1.1 : 1)),
+            o.weight * pal.weight * depth * (1 + drive * 0.3) * (isDotted ? 0.9 : 1),
+            dash,
+          );
           if (tube) {
             const off = 0.42 * depth * pal.weight;
             ctx.beginPath();
             ctx.moveTo(buf[c0 * 3]! - off, buf[c0 * 3 + 1]! - off);
             for (let s = c0 + 1; s <= c1; s++) ctx.lineTo(buf[s * 3]! - off, buf[s * 3 + 1]! - off);
-            ctx.strokeStyle = shine;
-            ctx.globalAlpha = clamp01(baseA * depth * (front ? 0.55 : 0.22));
-            ctx.lineWidth = Math.max(0.4, o.weight * pal.weight * depth * 0.28);
-            ctx.stroke();
+            ctx.stroke(
+              shine,
+              clamp01(baseA * depth * (front ? 0.55 : 0.22)),
+              Math.max(0.4, o.weight * pal.weight * depth * 0.28),
+            );
           }
         }
-        if (isDotted) ctx.setLineDash([]);
 
         // Comet: a brighter streak of light running along the ring, with a fading tail.
         if (hasComet(i)) {
-          let head = o.phase * 0.159 + orbT * (0.07 + Math.abs(o.rate) * 0.6) * Math.sign(o.rate || 1);
+          let head =
+            o.phase * 0.159 + orbT * (0.07 + Math.abs(o.rate) * 0.6) * Math.sign(o.rate || 1);
           head -= Math.floor(head);
           const hs = Math.floor(head * steps);
           const tail = Math.max(10, Math.round(steps * 0.22));
           const dir = o.rate >= 0 ? -1 : 1; // the tail trails behind the direction of travel
           const SEGS = 8;
+          const cometTone = mix(tone, params.theme === "light" ? pal.vivid : pal.highlight, 0.55);
           for (let g = 0; g < SEGS; g++) {
             const from = hs + dir * Math.round((tail * g) / SEGS);
             const to = hs + dir * Math.round((tail * (g + 1)) / SEGS);
@@ -869,30 +905,28 @@ export function createPresence(canvas: HTMLCanvasElement | OffscreenCanvas, init
               if (n === 0) ctx.moveTo(buf[si * 3]!, buf[si * 3 + 1]!);
               else ctx.lineTo(buf[si * 3]!, buf[si * 3 + 1]!);
             }
-            ctx.strokeStyle = rgba(mix(tone, params.theme === "light" ? pal.vivid : pal.highlight, 0.55), 1);
             const fade = Math.pow(1 - g / SEGS, 1.7);
-            ctx.globalAlpha = clamp01(baseA * depth * 1.7 * fade * (0.8 + drive * 0.6));
-            ctx.lineWidth = o.weight * pal.weight * depth * (1.8 - (g / SEGS) * 1.3);
-            ctx.stroke();
+            ctx.stroke(
+              cometTone,
+              clamp01(baseA * depth * 1.7 * fade * (0.8 + drive * 0.6)),
+              o.weight * pal.weight * depth * (1.8 - (g / SEGS) * 1.3),
+            );
           }
           // The head: a small bright glow (dark theme; additive light).
           const hz = buf[hs * 3 + 2]!;
           if (hz >= 0 === front && pal.blend === "lighter") {
             const hd = 1 - pal.depthFade * (1 - (hz + 1) * 0.5);
             const hr = o.weight * pal.weight * 4.5 * hd * (1 + drive * 0.4);
-            ctx.save();
-            ctx.translate(buf[hs * 3]!, buf[hs * 3 + 1]!);
-            ctx.scale(hr, hr);
-            ctx.fillStyle = unitRadial("comet", mix(tone, pal.highlight, 0.7), [
-              [0, 0.9],
-              [0.35, 0.25],
-              [1, 0],
-            ]);
-            ctx.globalAlpha = clamp01(baseA * hd * (0.8 + drive * 0.5));
-            ctx.beginPath();
-            ctx.arc(0, 0, 1, 0, Math.PI * 2);
-            ctx.fill();
-            ctx.restore();
+            ctx.radial(
+              "comet",
+              mix(tone, pal.highlight, 0.7),
+              COMET_STOPS,
+              0,
+              buf[hs * 3]!,
+              buf[hs * 3 + 1]!,
+              hr,
+              clamp01(baseA * hd * (0.8 + drive * 0.5)),
+            );
           }
         }
 
@@ -918,29 +952,25 @@ export function createPresence(canvas: HTMLCanvasElement | OffscreenCanvas, init
             0,
             Math.PI * 2,
           );
-          ctx.fillStyle = rgba(ptone, 1);
-          const na = clamp01(A * (0.3 + tw * 0.45) * (0.55 + energy * 0.45) * (0.35 + d * 0.9) * (1 + drive * 0.5));
-          ctx.globalAlpha = na;
-          ctx.fill();
+          const na = clamp01(
+            A * (0.3 + tw * 0.45) * (0.55 + energy * 0.45) * (0.35 + d * 0.9) * (1 + drive * 0.5),
+          );
+          ctx.fill(ptone, na);
           if (pt.size > 1.9 && front && pal.blend === "lighter") {
             const hr = pt.size * pal.weight * persp * 5.5 * (0.8 + drive * 0.5);
-            ctx.save();
-            ctx.translate(buf[s * 3]!, buf[s * 3 + 1]!);
-            ctx.scale(hr, hr);
-            ctx.fillStyle = unitRadial("halo", ptone, [
-              [0, 0.45],
-              [0.3, 0.12],
-              [1, 0],
-            ]);
-            ctx.globalAlpha = clamp01(na * 0.7);
-            ctx.beginPath();
-            ctx.arc(0, 0, 1, 0, Math.PI * 2);
-            ctx.fill();
-            ctx.restore();
+            ctx.radial(
+              "halo",
+              ptone,
+              HALO_STOPS,
+              0,
+              buf[s * 3]!,
+              buf[s * 3 + 1]!,
+              hr,
+              clamp01(na * 0.7),
+            );
           }
         }
       }
-      ctx.globalAlpha = 1;
     };
 
     const paintDust = (front: boolean) => {
@@ -965,11 +995,11 @@ export function createPresence(canvas: HTMLCanvasElement | OffscreenCanvas, init
           0,
           Math.PI * 2,
         );
-        ctx.fillStyle = rgba(dp.tone > 0.7 ? pal.highlight : pal.primary, 1);
-        ctx.globalAlpha = clamp01(A * (0.3 + tw * 0.45) * (0.35 + d * 0.8) * (1 + drive * 0.4));
-        ctx.fill();
+        ctx.fill(
+          dp.tone > 0.7 ? pal.highlight : pal.primary,
+          clamp01(A * (0.3 + tw * 0.45) * (0.35 + d * 0.8) * (1 + drive * 0.4)),
+        );
       }
-      ctx.globalAlpha = 1;
     };
 
     /* ------------------------------------------------------- far side */
@@ -978,44 +1008,29 @@ export function createPresence(canvas: HTMLCanvasElement | OffscreenCanvas, init
 
     /* ---------------------------------------------------- central sphere */
     // Soft body: a luminous shell with a deeper centre, strictly circular.
-    ctx.save();
-    ctx.translate(cx, cy);
-    ctx.scale(sphereR, sphereR);
-    const bodyKey = `body|${qc(field)}`;
-    let body = radialCache.get(bodyKey);
-    if (!body) {
-      body = ctx.createRadialGradient(0, 0, 0.1, 0, 0, 1);
-      body.addColorStop(0, rgba(field, 0.12));
-      body.addColorStop(0.55, rgba(field, 0.26));
-      body.addColorStop(0.9, rgba(field, 0.55));
-      body.addColorStop(1, rgba(field, 0));
-      radialCache.set(bodyKey, body);
-    }
-    ctx.fillStyle = body;
-    ctx.globalAlpha = clamp01(pal.coreAlpha * pal.body * boot * intensity * (0.85 + drive * 0.5));
-    ctx.beginPath();
-    ctx.arc(0, 0, 1, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.restore();
-    ctx.globalAlpha = 1;
+    ctx.radial(
+      "body",
+      field,
+      BODY_STOPS,
+      0.1,
+      cx,
+      cy,
+      sphereR,
+      clamp01(pal.coreAlpha * pal.body * boot * intensity * (0.85 + drive * 0.5)),
+    );
 
     // Nucleus: a small bright heart that breathes and brightens with the voice.
     const nucR = sphereR * (0.42 + breath * 2 + drive * 0.12);
-    ctx.save();
-    ctx.translate(cx, cy);
-    ctx.scale(nucR, nucR);
-    ctx.fillStyle = unitRadial("nucleus", mix(field, pal.spec, params.theme === "light" ? 0.7 : 0.45), [
-      [0, 0.5],
-      [0.35, 0.22],
-      [0.7, 0.06],
-      [1, 0],
-    ]);
-    ctx.globalAlpha = clamp01(A * (0.32 + energy * 0.1 + drive * 0.55));
-    ctx.beginPath();
-    ctx.arc(0, 0, 1, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.restore();
-    ctx.globalAlpha = 1;
+    ctx.radial(
+      "nucleus",
+      mix(field, pal.spec, params.theme === "light" ? 0.7 : 0.45),
+      NUCLEUS_STOPS,
+      0,
+      cx,
+      cy,
+      nucR,
+      clamp01(A * (0.32 + energy * 0.1 + drive * 0.55)),
+    );
 
     // Wireframe interior: latitudes and meridians on a tilted, slowly turning
     // axis — the technical structure inside the presence.
@@ -1078,7 +1093,11 @@ export function createPresence(canvas: HTMLCanvasElement | OffscreenCanvas, init
         const v = land[i]!;
         // land reads as dense bright dots, ocean as sparse faint ones; the rim thins out
         const landness = clamp01((v - 0.42) * 2.4);
-        const shade = (0.08 + 0.92 * day * (0.35 + 0.65 * lit)) * (0.12 + landness * 1.05) * (0.4 + z * 0.6) * 1.35;
+        const shade =
+          (0.08 + 0.92 * day * (0.35 + 0.65 * lit)) *
+          (0.12 + landness * 1.05) *
+          (0.4 + z * 0.6) *
+          1.35;
         // A few warm city lights on night-side land.
         if (day < 0.55 && landness > 0.35 && Math.abs(citySeed[i]!) < 0.32 && cities < CITY_MAX) {
           const cp = FOCAL / (FOCAL - z * sR);
@@ -1093,11 +1112,15 @@ export function createPresence(canvas: HTMLCanvasElement | OffscreenCanvas, init
         const persp = FOCAL / (FOCAL - z * sR);
         dotX[i] = cx + x * sphereR * 0.985 * persp;
         dotY[i] = cy + y * sphereR * 0.985 * persp;
-        dotR[i] = dotBase * (0.45 + clamp01((v - 0.42) * 2.4) * 0.75) * (0.6 + z * 0.4) * (1 + drive * 0.25);
+        dotR[i] =
+          dotBase *
+          (0.45 + clamp01((v - 0.42) * 2.4) * 0.75) *
+          (0.6 + z * 0.4) *
+          (1 + drive * 0.25);
         dotB[i] = b;
       }
-      const dotTone = params.theme === "light" ? mix(field, pal.vivid, 0.3) : mix(field, pal.highlight, 0.38);
-      ctx.fillStyle = rgba(dotTone, 1);
+      const dotTone =
+        params.theme === "light" ? mix(field, pal.vivid, 0.3) : mix(field, pal.highlight, 0.38);
       for (let b = 0; b < DOT_BUCKETS; b++) {
         ctx.beginPath();
         let any = false;
@@ -1109,11 +1132,17 @@ export function createPresence(canvas: HTMLCanvasElement | OffscreenCanvas, init
           any = true;
         }
         if (!any) continue;
-        ctx.globalAlpha = clamp01(A * pal.wire * (0.1 + ((b + 1) / DOT_BUCKETS) * 0.9) * (0.85 + energy * 0.2 + drive * 0.35));
-        ctx.fill();
+        ctx.fill(
+          dotTone,
+          clamp01(
+            A *
+              pal.wire *
+              (0.1 + ((b + 1) / DOT_BUCKETS) * 0.9) *
+              (0.85 + energy * 0.2 + drive * 0.35),
+          ),
+        );
       }
       // City lights, in two brightness passes.
-      ctx.fillStyle = rgba(pal.ember, 1);
       for (let pass = 0; pass < 2; pass++) {
         ctx.beginPath();
         for (let c = 0; c < cities; c++) {
@@ -1122,19 +1151,15 @@ export function createPresence(canvas: HTMLCanvasElement | OffscreenCanvas, init
           ctx.moveTo(cityX[c]! + cr, cityY[c]!);
           ctx.arc(cityX[c]!, cityY[c]!, cr, 0, Math.PI * 2);
         }
-        ctx.globalAlpha = clamp01(A * pal.wire * (pass ? 0.95 : 0.55) * (0.85 + drive * 0.3));
-        ctx.fill();
+        ctx.fill(pal.ember, clamp01(A * pal.wire * (pass ? 0.95 : 0.55) * (0.85 + drive * 0.3)));
       }
-      ctx.globalAlpha = 1;
     }
 
     const wireTone = mix(pal.highlight, pal.primary, params.theme === "light" ? 0.7 : 0.5);
-    const wireStroke = rgba(wireTone, 1);
     // The grid is now a fine overlay; the dot surface carries the body.
     const wireA = A * pal.wire * (0.2 + energy * 0.12) * (1 + drive * 0.5);
     const wireSteps = Math.max(28, Math.round(56 * detail));
-    ctx.lineWidth = 0.5 * pal.weight * (params.theme === "light" ? 1.25 : 1);
-    ctx.strokeStyle = wireStroke;
+    const wireW = 0.5 * pal.weight * (params.theme === "light" ? 1.25 : 1);
 
     const lat = 4;
     for (let li = -lat; li <= lat; li++) {
@@ -1160,8 +1185,7 @@ export function createPresence(canvas: HTMLCanvasElement | OffscreenCanvas, init
           started = true;
         } else ctx.lineTo(x, y);
       }
-      ctx.globalAlpha = clamp01(wireA * (0.55 + 0.45 * cr));
-      ctx.stroke();
+      ctx.stroke(wireTone, clamp01(wireA * (0.55 + 0.45 * cr)), wireW);
     }
 
     const meridians = 7;
@@ -1193,87 +1217,70 @@ export function createPresence(canvas: HTMLCanvasElement | OffscreenCanvas, init
           started = true;
         } else ctx.lineTo(x, y);
       }
-      ctx.globalAlpha = clamp01(wireA * 0.8);
-      ctx.stroke();
+      ctx.stroke(wireTone, clamp01(wireA * 0.8), wireW);
     }
-    ctx.globalAlpha = 1;
 
     // Limb: a crisp circular edge that gives the sphere its object-ness.
     ctx.beginPath();
     ctx.arc(cx, cy, sphereR, 0, Math.PI * 2);
-    ctx.strokeStyle = rgba(pal.highlight, 1);
-    ctx.globalAlpha = clamp01(A * (0.34 + drive * 0.5));
-    ctx.lineWidth = 0.9 * pal.weight;
-    ctx.stroke();
+    ctx.stroke(pal.highlight, clamp01(A * (0.34 + drive * 0.5)), 0.9 * pal.weight);
 
     // Day-side crescent: the atmosphere catching the key light (upper left), fading toward the sides.
     {
       const la = Math.atan2(-0.38, -0.83);
       const cres = mix(field, pal.spec, params.theme === "light" ? 0.85 : 0.45);
-      ctx.strokeStyle = rgba(cres, 1);
-      ctx.lineCap = "round";
       for (let k = 0; k < 3; k++) {
         const span = [1.55, 1.0, 0.5][k]!;
         ctx.beginPath();
         ctx.arc(cx, cy, sphereR * 1.035, la - span, la + span);
-        ctx.globalAlpha = clamp01(A * [0.1, 0.16, 0.24][k]! * (pal.blend === "lighter" ? 1 : 0.8) * (0.85 + energy * 0.2 + drive * 0.3));
-        ctx.lineWidth = [2.6, 1.9, 1.3][k]! * pal.weight;
-        ctx.stroke();
+        ctx.stroke(
+          cres,
+          clamp01(
+            A *
+              [0.1, 0.16, 0.24][k]! *
+              (pal.blend === "lighter" ? 1 : 0.8) *
+              (0.85 + energy * 0.2 + drive * 0.3),
+          ),
+          [2.6, 1.9, 1.3][k]! * pal.weight,
+        );
       }
-      ctx.lineCap = "butt";
-      ctx.globalAlpha = 1;
     }
 
     // Atmosphere: a thin luminous band hugging the limb, brighter toward the key light.
     const atmoR = sphereR * 1.16;
-    ctx.save();
-    ctx.translate(cx, cy);
-    ctx.scale(atmoR, atmoR);
-    ctx.fillStyle = unitRadial(
+    ctx.radial(
       "atmo",
       mix(field, pal.highlight, 0.25),
-      [
-        [0, 0],
-        [0.8, 0],
-        [0.86, 0.32],
-        [0.9, 0.14],
-        [1, 0],
-      ],
+      ATMO_STOPS,
       0,
+      cx,
+      cy,
+      atmoR,
+      clamp01(A * (0.55 + energy * 0.15 + drive * 0.4)),
     );
-    ctx.globalAlpha = clamp01(A * (0.55 + energy * 0.15 + drive * 0.4));
-    ctx.beginPath();
-    ctx.arc(0, 0, 1, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.restore();
-    ctx.globalAlpha = 1;
 
     // Specular: an off-centre highlight so the sphere reads as lit, not flat.
     const specR = sphereR * (0.6 + drive * 0.1);
-    ctx.save();
-    ctx.translate(cx - sphereR * 0.26, cy - sphereR * 0.3);
-    ctx.scale(specR, specR);
-    ctx.fillStyle = unitRadial("spec", pal.highlight, [
-      [0, 0.5],
-      [0.5, 0.16],
-      [1, 0],
-    ]);
-    ctx.globalAlpha = clamp01(A * 0.28 * (0.7 + drive * 0.6));
-    ctx.beginPath();
-    ctx.arc(0, 0, 1, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.restore();
-    ctx.globalAlpha = 1;
+    ctx.radial(
+      "spec",
+      pal.highlight,
+      SPEC_STOPS,
+      0,
+      cx - sphereR * 0.26,
+      cy - sphereR * 0.3,
+      specR,
+      clamp01(A * 0.28 * (0.7 + drive * 0.6)),
+    );
 
     /* ------------------------------------------------------ near side */
     paintOrbits(true);
     paintDust(true);
 
-    ctx.globalCompositeOperation = prevBlend;
+    ctx.end();
     if (t0) (meter.__presenceCost ??= []).push(performance.now() - t0);
   };
 
-  raf = requestAnimationFrame(frame);
+  stopFrames = clock(frame);
 
   return {
     params,
@@ -1281,11 +1288,12 @@ export function createPresence(canvas: HTMLCanvasElement | OffscreenCanvas, init
     resize,
     destroy() {
       destroyed = true;
-      cancelAnimationFrame(raf);
+      stopFrames?.();
       if (shrinkTimer) clearTimeout(shrinkTimer);
       if (hasDocument) document.removeEventListener("visibilitychange", onVisibility);
-      radialCache.clear();
-      ctx?.clearRect(0, 0, canvas.width, canvas.height);
+      ctx?.clear();
+      ctx?.destroy();
     },
+    painter: ctx?.kind,
   };
 }

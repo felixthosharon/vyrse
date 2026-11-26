@@ -964,6 +964,11 @@ aside.liquid-strong {
   backdrop-filter: none;
   -webkit-backdrop-filter: none;
 }
+/* The background layers that drift and sweep get their own GPU layer, so each frame of them moves the layer
+   instead of repainting it (measured 2026-11-26: ~18% -> ~10% of a core at 60 fps on a 2560 px window). */
+.vyr-ambient {
+  will-change: transform, opacity;
+}
 /* The slow background drift and light sweep are hardly visible on a small screen, but every frame of
    them makes the glass above (composer, answer card) re-blur. Still on the phone. */
 [data-device="phone"] .vyr-ambient {

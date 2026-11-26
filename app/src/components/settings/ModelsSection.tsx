@@ -6,6 +6,7 @@ import { useVyrse } from "@/lib/vyrse/store";
 import { copyText } from "@/lib/clipboard";
 import { Dropdown, Row, Section } from "./controls";
 import { LocalModels } from "./LocalModels";
+import { cn } from "@/lib/utils";
 
 const key = (m: { provider: string; model: string }) => `${m.provider}::${m.model}`;
 
@@ -165,7 +166,7 @@ export function ModelsSection({ open }: { open: boolean }) {
           Your messages then go to that company; everything else stays here.
         </p>
         {isPrivate && (
-          <div className="flex items-center justify-between gap-3 rounded-2xl border border-dashed border-border/80 px-3 py-2.5">
+          <div className="liquid relative flex items-center justify-between gap-3 rounded-2xl px-3.5 py-3">
             <p className="text-[11px] text-muted-foreground">Private mode keeps VYRSE on your PC only, so online models are off.</p>
             <button type="button" onClick={() => setMode("assistant")} className="liquid-hover relative shrink-0 rounded-full border border-border-strong px-3 py-1 text-[11px] text-muted-foreground hover:text-foreground">
               Leave Private mode
@@ -184,7 +185,7 @@ export function ModelsSection({ open }: { open: boolean }) {
               const isOpen = expanded === a.id;
               const waiting = signIn?.id === a.id;
               return (
-                <li key={a.id} data-account={a.id} className="rounded-2xl border border-border/70 bg-surface/40 px-3.5 py-3">
+                <li key={a.id} data-account={a.id} className={cn("liquid relative rounded-2xl px-3.5 py-3", a.connected && "ring-1 ring-primary/30")}>
                   <div className="flex items-center justify-between gap-3">
                     <div className="min-w-0">
                       <p className="flex items-center gap-2 text-[13px] text-foreground">

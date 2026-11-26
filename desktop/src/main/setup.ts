@@ -104,8 +104,15 @@ export function runSetup(source: SetupSource, hermesHome: string, onLine: (line:
   })
 }
 
-/** Hermes Agent's own installer for Windows (the one its README tells people to run). */
-export const HERMES_INSTALLER_URL = 'https://hermes-agent.nousresearch.com/install.ps1'
+/**
+ * The Hermes Agent VYRSE is built and tested against. VYRSE installs exactly this one, with Hermes' own installer
+ * from the same commit: Hermes changes fast, and v0.23 (2026-11) moved its launcher, switched to Python 3.14,
+ * stopped installing the voice libraries up front and no longer fits two of VYRSE's patches, so installing the
+ * latest left new users with "Hermes Agent didn't install". Move this pin only after testing a fresh install.
+ */
+export const HERMES_COMMIT = 'd62fbea7e110c6008e1ffe1b226d1f593ba4bc28'
+/** Hermes Agent's own installer for Windows, from that commit. */
+export const HERMES_INSTALLER_URL = `https://raw.githubusercontent.com/NousResearch/hermes-agent/${HERMES_COMMIT}/scripts/install.ps1`
 
 /**
  * PowerShell arguments that install Hermes Agent without asking questions: fetch the official installer to a
@@ -121,7 +128,7 @@ export function hermesInstallArgs(localScript?: string): string[] {
     "$f = Join-Path $env:TEMP 'hermes-install.ps1'",
     "Write-Output 'Downloading the Hermes installer'",
     `Invoke-WebRequest -UseBasicParsing -Uri '${HERMES_INSTALLER_URL}' -OutFile $f`,
-    '& powershell.exe -NoProfile -ExecutionPolicy Bypass -File $f -NonInteractive',
+    `& powershell.exe -NoProfile -ExecutionPolicy Bypass -File $f -NonInteractive -Commit ${HERMES_COMMIT}`,
     'exit $LASTEXITCODE',
   ].join('; ')
   return [...base, '-Command', script]

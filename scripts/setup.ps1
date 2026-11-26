@@ -37,16 +37,19 @@ if (-not $ModelsDir) { $ModelsDir = Join-Path $Repo 'models' }
 $HermesHome = if ($env:HERMES_HOME) { $env:HERMES_HOME } else { Join-Path $env:LOCALAPPDATA 'hermes' }
 $Agent = Join-Path $HermesHome 'hermes-agent'
 # Hermes' own launcher picks the right Python for the install; installs from before it have a venv in the checkout.
-$Hermes = Join-Path $Agent '.hermes\bin\hermes.cmd'
-if (-not (Test-Path $Hermes)) { $Hermes = Join-Path $Agent 'venv\Scripts\hermes.exe' }
+# Until Hermes v0.22 it sat in the checkout; from v0.23 it is bin\hermes.exe in the Hermes home.
+$Hermes = @((Join-Path $Agent '.hermes\bin\hermes.cmd'), (Join-Path $HermesHome 'bin\hermes.exe'), (Join-Path $HermesHome 'bin\hermes.cmd'), (Join-Path $Agent 'venv\Scripts\hermes.exe')) | Where-Object { Test-Path $_ } | Select-Object -First 1
+if (-not $Hermes) { $Hermes = Join-Path $HermesHome 'bin\hermes.exe' }
 # The Python Hermes actually runs in: the environment its package manager recorded (installs\<id>\facts.json),
 # newest first; else that old venv. VYRSE's extra libraries are checked and installed against this one.
-$Py = $null
-foreach ($facts in @(Get-ChildItem (Join-Path $HermesHome 'installs\*\facts.json') -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending)) {
-  try { $envDir = (Get-Content $facts.FullName -Raw | ConvertFrom-Json).packages.venv.environment } catch { continue }
-  if ($envDir -and (Test-Path (Join-Path $envDir 'Scripts\python.exe'))) { $Py = Join-Path $envDir 'Scripts\python.exe'; break }
+function Find-HermesPython {
+  foreach ($facts in @(Get-ChildItem (Join-Path $HermesHome 'installs\*\facts.json') -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending)) {
+    try { $envDir = (Get-Content $facts.FullName -Raw | ConvertFrom-Json).packages.venv.environment } catch { continue }
+    if ($envDir -and (Test-Path (Join-Path $envDir 'Scripts\python.exe'))) { return (Join-Path $envDir 'Scripts\python.exe') }
+  }
+  return (Join-Path $Agent 'venv\Scripts\python.exe')
 }
-if (-not $Py) { $Py = Join-Path $Agent 'venv\Scripts\python.exe' }
+$Py = Find-HermesPython
 # Hermes brings its own uv; where it sits has moved between Hermes versions.
 $Uv = @((Join-Path $HermesHome 'bin\uv.exe')) + @(Get-ChildItem (Join-Path $HermesHome 'tools\uv-*\uv.exe') -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending | ForEach-Object FullName) + @((Get-Command uv -ErrorAction SilentlyContinue).Source) | Where-Object { $_ -and (Test-Path $_) } | Select-Object -First 1
 $VyrseDir = Join-Path $HermesHome 'vyrse'
@@ -119,7 +122,29 @@ if ($enabled -match '\bvyrse\b') { Ok "enabled" }
 elseif ($Check) { Todo "plugin not enabled" }
 else { & $Hermes plugins enable vyrse | Out-Null; Did "enabled" }
 
-# 4. Voice libraries ----------------------------------------------------------------------
+# 4. Hermes' optional parts ----------------------------------------------------------------
+# A fresh Hermes installs only its core; its package manager adds the rest the first time something asks for it.
+# VYRSE needs these from the start (2026-11-26: on a new PC the voice had no numpy/onnxruntime): speech in and out
+# (audio-io, stt-whisper), seeing images (vision), reading documents (doc-extract), using the screen (computer-use)
+# and the online voice (edge-tts). The same set as the install VYRSE is tested on.
+Write-Host "Hermes parts VYRSE uses"
+$HermesExtras = @('audio-io', 'stt-whisper', 'vision', 'doc-extract', 'computer-use', 'edge-tts')
+& $Py -c "import numpy, onnxruntime, faster_whisper, sounddevice" 2>$null
+if ($LASTEXITCODE -eq 0) { Ok "speech, vision and documents" }
+elseif ($Check) { Todo "Hermes' speech libraries are missing (numpy, onnxruntime, faster-whisper)" }
+else {
+  Write-Host "  installing $($HermesExtras -join ', ') (a few hundred MB)..."
+  $extraArgs = @($HermesExtras | ForEach-Object { '--extra'; $_ })
+  Push-Location $Agent
+  & $Hermes pm install @extraArgs 2>&1 | Where-Object { $_ -match '^\s*[^\s]*\s*(venv|error|fail)' } | ForEach-Object { "  $_" }
+  Pop-Location
+  $Py = Find-HermesPython  # the package manager may have moved Hermes to a new environment
+  & $Py -c "import numpy, onnxruntime, faster_whisper, sounddevice" 2>$null
+  if ($LASTEXITCODE -eq 0) { Did "speech, vision and documents" }
+  else { Fail "Hermes' speech libraries did not install (no internet?). VYRSE can't hear or speak until this works: run setup again." }
+}
+
+# 4b. Voice libraries ---------------------------------------------------------------------
 Write-Host "Voice libraries ($VyrseDir\pylib)"
 $Pylib = Join-Path $VyrseDir 'pylib'
 & $Py -c "import sys; sys.path.append(r'$Pylib'); import kokoro_onnx, phonemizer, espeakng_loader, pypdf" 2>$null

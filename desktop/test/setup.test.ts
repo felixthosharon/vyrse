@@ -3,7 +3,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
-import { findSetupSource, hermesInstallArgs, HERMES_INSTALLER_URL, setupState, type SetupSource } from '../src/main/setup'
+import { findSetupSource, hermesInstallArgs, HERMES_COMMIT, HERMES_INSTALLER_URL, setupState, type SetupSource } from '../src/main/setup'
 
 let tmp: string
 let home: string
@@ -69,13 +69,14 @@ describe('findSetupSource', () => {
 })
 
 describe('installing Hermes', () => {
-  it('runs the official installer from a file, without questions', () => {
+  it('runs the official installer from a file, without questions, pinned to the Hermes VYRSE was tested with', () => {
     const args = hermesInstallArgs()
-    expect(HERMES_INSTALLER_URL).toBe('https://hermes-agent.nousresearch.com/install.ps1')
+    expect(HERMES_COMMIT).toMatch(/^[0-9a-f]{40}$/)
+    expect(HERMES_INSTALLER_URL).toBe(`https://raw.githubusercontent.com/NousResearch/hermes-agent/${HERMES_COMMIT}/scripts/install.ps1`)
     expect(args.slice(0, 4)).toEqual(['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass'])
     const script = args[args.indexOf('-Command') + 1]!
     expect(script).toContain(`-Uri '${HERMES_INSTALLER_URL}'`)
-    expect(script).toContain('-File $f -NonInteractive')
+    expect(script).toContain(`-File $f -NonInteractive -Commit ${HERMES_COMMIT}`)
     expect(script).toContain('exit $LASTEXITCODE')
     expect(script).not.toMatch(/iex|Invoke-Expression/i) // never piped straight into the shell
   })
